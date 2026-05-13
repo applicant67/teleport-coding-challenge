@@ -1,0 +1,8 @@
+# pack-refs with: peeled fully-peeled sorted 
+367ed819b1abb2dbc4de6e09fc10b2bf3ebb14a7 refs/heads/enhance-sign-in-and-session
+585576d3643247cfc5a647a1b3edc419644592ec refs/heads/main
+88b1ccfd41534860971850ce52fb162c08fb5504 refs/heads/sign-in
+5fce0f38d9b6ce0aaa0f581460cf48baefc85e38 refs/pull/1/head
+88b1ccfd41534860971850ce52fb162c08fb5504 refs/pull/2/head
+367ed819b1abb2dbc4de6e09fc10b2bf3ebb14a7 refs/pull/3/head
+d6f6857c4e6827d62b1089c9519c715780b28d14 refs/pull/3/merge

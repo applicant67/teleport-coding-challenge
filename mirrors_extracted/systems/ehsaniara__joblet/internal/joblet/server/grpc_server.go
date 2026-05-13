@@ -1,0 +1,110 @@
+package server
+
+import (
+	"fmt"
+	"net"
+
+	pb "github.com/ehsaniara/joblet-proto/v2/gen"
+	"github.com/ehsaniara/joblet/internal/joblet/adapters"
+	auth2 "github.com/ehsaniara/joblet/internal/joblet/auth"
+	"github.com/ehsaniara/joblet/internal/joblet/core/interfaces"
+	"github.com/ehsaniara/joblet/internal/joblet/core/volume"
+	"github.com/ehsaniara/joblet/internal/joblet/monitoring"
+	"github.com/ehsaniara/joblet/internal/joblet/telemetry"
+	"github.com/ehsaniara/joblet/pkg/client"
+	"github.com/ehsaniara/joblet/pkg/config"
+	"github.com/ehsaniara/joblet/pkg/logger"
+	"github.com/ehsaniara/joblet/pkg/platform"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
+)
+
+// StartGRPCServer initializes and starts the main Joblet gRPC server.
+func StartGRPCServer(jobStore adapters.JobStorer, telemetryCollector *telemetry.Collector, joblet interfaces.Joblet, cfg *config.Config, networkStore adapters.NetworkStorer, volumeManager *volume.Manager, monitoringService *monitoring.Service, platform platform.Platform) (*grpc.Server, error) {
+	serverLogger := logger.WithField("component", "grpc-server")
+	serverAddress := cfg.GetServerAddress()
+
+	// Get TLS configuration from embedded certificates
+	tlsConfig, err := cfg.GetServerTLSConfig()
+	if err != nil {
+		serverLogger.Error("failed to create TLS config from embedded certificates", "error", err)
+		return nil, fmt.Errorf("failed to create TLS config: %w", err)
+	}
+
+	creds := credentials.NewTLS(tlsConfig)
+
+	grpcOptions := []grpc.ServerOption{
+		grpc.Creds(creds),
+		grpc.MaxRecvMsgSize(int(cfg.GRPC.MaxRecvMsgSize)),
+		grpc.MaxSendMsgSize(int(cfg.GRPC.MaxSendMsgSize)),
+		grpc.MaxHeaderListSize(uint32(cfg.GRPC.MaxHeaderListSize)),
+		grpc.MaxConcurrentStreams(cfg.GRPC.MaxConcurrentStreams),
+		grpc.ConnectionTimeout(cfg.GRPC.ConnectionTimeout),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    cfg.GRPC.KeepAliveTime,
+			Timeout: cfg.GRPC.KeepAliveTimeout,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             cfg.GRPC.KeepAliveTime / 2, // Allow keepalive pings every KeepAliveTime/2
+			PermitWithoutStream: true,                       // Allow keepalive pings even when no streams are active
+		}),
+	}
+
+	grpcServer := grpc.NewServer(grpcOptions...)
+
+	auth := auth2.NewGRPCAuthorization()
+
+	// Create persist client for historical queries via Unix socket IPC
+	persistSocketPath := "/opt/joblet/run/persist-grpc.sock"
+	persistClient, err := client.NewPersistClientUnix(persistSocketPath)
+	if err != nil {
+		serverLogger.Warn("failed to connect to persist service, historical queries will be unavailable",
+			"socket", persistSocketPath,
+			"error", err)
+		persistClient = nil // Continue without persist client
+	} else {
+		serverLogger.Info("connected to persist service via Unix socket", "socket", persistSocketPath)
+	}
+
+	// Create job service (lean, no workflow orchestration)
+	jobService := NewJobServiceServer(auth, jobStore, telemetryCollector, joblet, persistClient)
+	pb.RegisterJobServiceServer(grpcServer, jobService)
+
+	// Create and register network service
+	networkService := NewNetworkServiceServer(auth, networkStore)
+	pb.RegisterNetworkServiceServer(grpcServer, networkService)
+
+	// Create and register volume service
+	volumeService := NewVolumeServiceServer(auth, volumeManager)
+	pb.RegisterVolumeServiceServer(grpcServer, volumeService)
+
+	// Create and register monitoring service
+	monitoringGrpcService := NewMonitoringServiceServer(monitoringService, cfg)
+	pb.RegisterMonitoringServiceServer(grpcServer, monitoringGrpcService)
+
+	// Create and register runtime service
+	runtimeService := NewRuntimeServiceServer(auth, cfg.Runtime.BasePath, platform)
+	pb.RegisterRuntimeServiceServer(grpcServer, runtimeService)
+
+	lis, err := net.Listen("tcp", serverAddress)
+	if err != nil {
+		serverLogger.Error("failed to create listener", "address", serverAddress, "error", err)
+		return nil, fmt.Errorf("failed to listen: %w", err)
+	}
+
+	go func() {
+		serverLogger.Info("starting gRPC server", "address", serverAddress)
+
+		if serveErr := grpcServer.Serve(lis); serveErr != nil {
+			serverLogger.Error("gRPC server stopped with error", "error", serveErr)
+		} else {
+			serverLogger.Info("gRPC server stopped gracefully")
+		}
+	}()
+
+	serverLogger.Info("gRPC server initialized", "address", serverAddress)
+
+	return grpcServer, nil
+}

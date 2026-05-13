@@ -1,0 +1,8 @@
+# pack-refs with: peeled fully-peeled sorted 
+b51017ad9d405445e2f9747cb490adf04f7e67f7 refs/heads/main
+f1c867e048431c35f6ee24d9a8a69d61fdbf30a8 refs/heads/ndo/grpc
+388b213e8e4be1c4bb2b854255cdb64f40b2cf68 refs/heads/ndo/lib
+13d892424fc5268563545b0c27bac2055e51b924 refs/pull/1/head
+a10f56f57844cdbb49fe5a9807f1824ea5dfc9ec refs/pull/2/head
+f1c867e048431c35f6ee24d9a8a69d61fdbf30a8 refs/pull/3/head
+388b213e8e4be1c4bb2b854255cdb64f40b2cf68 refs/pull/4/head

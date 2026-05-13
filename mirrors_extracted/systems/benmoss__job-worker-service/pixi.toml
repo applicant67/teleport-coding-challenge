@@ -1,0 +1,13 @@
+[workspace]
+authors = ["Ben Moss <ben@mossity.com>"]
+channels = ["conda-forge"]
+name = "job-worker-service"
+platforms = ["linux-aarch64", "linux-64"]
+version = "0.1.0"
+
+[tasks]
+build-workerd = "go build -o bin/jobworkerd ./cmd/jobworkerd"
+
+[dependencies]
+buf = ">=1.63.0,<2"
+go-nocgo = ">=1.25.5,<2"

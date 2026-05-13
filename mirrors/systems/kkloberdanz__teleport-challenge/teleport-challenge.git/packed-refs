@@ -1,0 +1,10 @@
+# pack-refs with: peeled fully-peeled sorted 
+37a15dee211fc9122cf9c12f51c0e7a43b4a62d9 refs/heads/kkloberdanz/design-doc
+5e191621bbbaf63756f1f45b3f3533e251f9f8c1 refs/heads/kkloberdanz/issue-2-project-setup
+7f21d72eb23ba0bc1b50dc84c78251b516109f69 refs/heads/kkloberdanz/issue-3-job-lifecycle
+b1fbcd2d1cc1d43f44023af069f0ffe15c0bb592 refs/heads/kkloberdanz/issue-4-5-output-streaming-tls-and-auth
+c969340f246378c3c14f5989909c6171a9cd059c refs/heads/main
+37a15dee211fc9122cf9c12f51c0e7a43b4a62d9 refs/pull/1/head
+5e191621bbbaf63756f1f45b3f3533e251f9f8c1 refs/pull/6/head
+7f21d72eb23ba0bc1b50dc84c78251b516109f69 refs/pull/7/head
+b1fbcd2d1cc1d43f44023af069f0ffe15c0bb592 refs/pull/8/head

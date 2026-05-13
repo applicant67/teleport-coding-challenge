@@ -1,0 +1,48 @@
+# Runtime Configuration for Fedora / Amazon Linux 2023+ (dnf-based)
+# This file is automatically selected by the installer based on OS detection.
+#
+# Supported distributions:
+#   - Fedora (all versions)
+#   - Amazon Linux 2023+
+#   - RHEL 9+ (uses dnf)
+#   - CentOS Stream 9+
+#   - Any dnf-based distribution
+#
+# Runtime Build Isolation:
+#   Runtime builds use OverlayFS-based chroot isolation. The host filesystem
+#   is mounted read-only as the lower layer, and all package installations
+#   (dnf, pip, etc.) write to an ephemeral upper layer. Only the resulting
+#   binaries and libraries are copied to the runtime directory.
+#   See: pkg/builder/isolation.go
+
+# Runtime System Configuration
+runtime:
+  base_path: "/opt/joblet/runtimes"
+
+  # Common paths where runtimes may be installed
+  common_paths:
+    - "/usr/local/bin"
+    - "/usr/local/lib"
+    - "/usr/lib/jvm"
+    - "/usr/local/node"
+    - "/usr/local/go"
+
+  # Paths mounted read-only into job sandbox
+  # These provide essential binaries and libraries for job execution
+  allowed_mounts:
+    - "/usr/bin"
+    - "/bin"
+    - "/usr/sbin"               # Network tools (ip, route, etc.)
+    - "/lib"
+    - "/lib64"
+    - "/usr/lib"
+    - "/usr/lib64"
+    # Network configuration files
+    - "/etc/resolv.conf"        # DNS resolver configuration
+    - "/etc/hosts"              # Local hostname resolution
+    - "/etc/nsswitch.conf"      # Name service switch configuration
+    # SSL certificate directories
+    - "/etc/ssl"
+    - "/etc/pki"
+    - "/etc/ca-certificates"
+    - "/usr/share/ca-certificates"

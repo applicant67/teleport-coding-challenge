@@ -1,0 +1,35 @@
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+C  = US
+ST = Washington
+L  = Seattle
+O  = Job Worker Org
+CN = jobworker.local
+
+[v3_req]
+# This certificate cannot issue other certificates
+basicConstraints = critical, CA:FALSE
+
+# Subject Alternative Name: Includes DNS names and IP addresses for the server
+subjectAltName = @alt_names
+
+# The server certificate is used for digital signatures and key encipherment
+keyUsage = critical, digitalSignature, keyEncipherment
+
+# Extended Key Usage for server authentication
+extendedKeyUsage = serverAuth
+
+# Optional: Authority Info Access (AIA)
+# authorityInfoAccess = OCSP;URI:http://ocsp.localhost/server
+
+# Optional: CRL Distribution Points (CDP)
+# crlDistributionPoints = URI:http://localhost/crl/server.crl
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = jobworker.local
+IP.1 = 127.0.0.1

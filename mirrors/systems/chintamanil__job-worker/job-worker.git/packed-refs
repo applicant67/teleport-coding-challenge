@@ -1,0 +1,16 @@
+# pack-refs with: peeled fully-peeled sorted 
+1b16a96887b9f7b310d642e7480031e744a6e511 refs/heads/cgroups
+55730d380888a30c95a39fd7fb5033d4d1caf7c7 refs/heads/cli-client
+51fd786d9a32e6e75521b4776124a28f2f03ac9e refs/heads/core-proto
+cc97aa8a8c0059690c485b10774d89fc8aac3ddf refs/heads/grpc-server
+7f8fc1163da6e6e2809a7d8a4749c76c07ff5378 refs/heads/integration-tests
+05a7eb02761b4fa870f6a9ea2be2e4d6a8b488ab refs/heads/job-execution
+dac4636c1e6671ba42014558ebe8ad816e2446ed refs/heads/main
+aeda66973c6ec9c101252d54be52e2552d2a27ec refs/heads/rfc
+0452da7e843c8fb402d007a0221902bc8265a15b refs/pull/1/head
+51fd786d9a32e6e75521b4776124a28f2f03ac9e refs/pull/2/head
+aeda66973c6ec9c101252d54be52e2552d2a27ec refs/pull/3/head
+1b16a96887b9f7b310d642e7480031e744a6e511 refs/pull/4/head
+05a7eb02761b4fa870f6a9ea2be2e4d6a8b488ab refs/pull/5/head
+cc97aa8a8c0059690c485b10774d89fc8aac3ddf refs/pull/6/head
+7f8fc1163da6e6e2809a7d8a4749c76c07ff5378 refs/pull/7/head

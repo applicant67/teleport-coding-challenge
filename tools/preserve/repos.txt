@@ -1,0 +1,75 @@
+# Repos to preserve. Format: track owner/repo
+# Lines starting with # are ignored.
+#
+# Covers systems, fullstack, security-automation, and sre tracks.
+
+# --- systems ---
+systems MarkDHarris/teleport-systems-challenge
+systems MrChristianL/Teleport-Job-Worker-Service
+systems GevorgGal/jobworker
+systems chintamanil/job-worker
+systems kkloberdanz/teleport-challenge
+systems benmoss/job-worker-service
+systems joshuarubin/teleport-job-worker
+systems adalton/teleport-exercise
+systems RichyHBM/teleport-challenge
+systems razzam21/job-worker-service
+systems ilyazz/jobs
+systems bucknercd/jobworker
+systems rajansandeep/teleport-job-worker-svc
+systems mikewurtz/taskman
+systems kurczynski/teleport-job-worker
+systems gstelang/job-worker-service
+systems renatoaguimaraes/golang-job-scheduler
+systems jaylane/job-scheduler
+systems diptadas/job-worker
+systems mikihau/rest-job-worker
+systems tjper/teleport
+systems Zephan92/teleport-handson
+systems mcampo84/teleport_challenge
+systems samschurter/teleport-challenge
+systems shawon-crosen/teleport-challenge
+systems rsteinkeXJ/teleport_interview
+systems rexposadas/teleport
+systems moalf/teleport
+systems neildo/tjob
+systems kovyrin/teleport-exec
+systems kiakeshmiri/process-runner
+systems sabernabil12/teleport-job-worker
+systems xSudoNymx/job-manager
+
+# --- fullstack ---
+fullstack tobocop/go-teleport-directory-browser
+fullstack zship/teleport-challenge
+fullstack ibeckermayer/teleport-interview
+fullstack atburke/teleport_interview
+
+# --- security-automation ---
+security-automation nick-hinds/teleport_challenge
+security-automation tedmist1/challenge-auth0
+
+# --- sre ---
+sre Chili-Man/teleport-sre-challenge
+
+# --- systems (pass-3 finds via find-hidden BigQuery sweep) ---
+systems bill-rich/jobworker
+systems bkneis/jobworker
+systems clydotron/job_worker_service
+systems creack/telepilot
+systems devnulled/runjob
+systems DiscoRiver/jobber
+systems dtom90/teleport-backend-challenge
+systems ehsaniara/joblet
+systems flychicken123/Job_Worker
+systems ghostsquad/prototype-job-worker
+systems m3talsmith/jobberthehut
+systems P-A-R-U-S/Go-Job-Worker-Service
+systems s-gruneberg/jobWorker
+systems vincenthlam/teleport-interview
+systems zeeshanhaque21/JobWorkerService
+systems GavinFrazar/teleport-challenge
+systems antonefremov/teleport_job_worker
+systems gaurav36/systemd-wrapper
+systems supby/job-worker
+systems thompsy/go-linux-worker
+systems hashsequence/Linux-Job-Worker

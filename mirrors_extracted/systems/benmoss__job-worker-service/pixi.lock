@@ -1,0 +1,83 @@
+version: 6
+environments:
+  default:
+    channels:
+    - url: https://conda.anaconda.org/conda-forge/
+    options:
+      pypi-prerelease-mode: if-necessary-or-explicit
+    packages:
+      linux-64:
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/_go_select-2.2.0-nocgo.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/buf-1.63.0-ha8f183a_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/go-1.25.5-h1a1113d_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/go-nocgo-1.25.5-h8787d45_0.conda
+      linux-aarch64:
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_go_select-2.2.0-nocgo.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/buf-1.63.0-h652cbe9_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/go-1.25.5-h06e7c03_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/go-nocgo-1.25.5-hcff5026_0.conda
+packages:
+- conda: https://conda.anaconda.org/conda-forge/linux-64/_go_select-2.2.0-nocgo.tar.bz2
+  sha256: ca4a3553e5e97e63db3c6f327cf2ce25e4fb88288ef9743cef52887a2deb745f
+  md5: 172001043929ad2cdf1674b2d5e6e988
+  license: BSD-3-Clause
+  license_family: BSD
+  size: 4870
+  timestamp: 1586504620877
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_go_select-2.2.0-nocgo.tar.bz2
+  sha256: cd8025609278972dbbfafc55e611a1f9ddac5800c325c48cd9be209a92fdec25
+  md5: de5bfe531f4f70c860cbdf5cf1384b58
+  license: BSD-3-Clause
+  license_family: BSD
+  size: 4911
+  timestamp: 1586662601884
+- conda: https://conda.anaconda.org/conda-forge/linux-64/buf-1.63.0-ha8f183a_0.conda
+  sha256: 0cc9f8377af24a217b39bac851bcfae0eade90c18ec3109c3def555ce62b1d44
+  md5: 29d520a248817366377522418ea4c928
+  license: Apache-2.0
+  license_family: APACHE
+  size: 53949242
+  timestamp: 1767791302486
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/buf-1.63.0-h652cbe9_0.conda
+  sha256: 0ebfee4dd9c3ae409dd5776bb84f55679e829942f86a67c8337dbdca2446f1af
+  md5: bc8e1f89c535a6aab8854e039566c777
+  license: Apache-2.0
+  license_family: APACHE
+  size: 49786894
+  timestamp: 1767791184554
+- conda: https://conda.anaconda.org/conda-forge/linux-64/go-1.25.5-h1a1113d_0.conda
+  sha256: b2728d83976e084955e9da04fed589ea3bf13db8a401ca3d71565226184881d8
+  md5: 8c1754ef69ba53c858e298ebe14729f7
+  depends:
+  - _go_select 2.2.0 nocgo
+  license: BSD-3-Clause
+  license_family: BSD
+  size: 49571280
+  timestamp: 1764700626402
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/go-1.25.5-h06e7c03_0.conda
+  sha256: 48d658fd7402b143e647224bc93c9fb345e8f3a1e7ed70eac6e164dc19a1d946
+  md5: eeff0fb02466797a06112087d06bff5f
+  depends:
+  - _go_select 2.2.0 nocgo
+  license: BSD-3-Clause
+  license_family: BSD
+  size: 68450357
+  timestamp: 1764700744477
+- conda: https://conda.anaconda.org/conda-forge/linux-64/go-nocgo-1.25.5-h8787d45_0.conda
+  sha256: 005631fa1c034a2cbc13095286c9e8dc12eefb37388ef46244a6628895fbb08f
+  md5: 4c80b8a3a1ae669b38909f0072beb8ac
+  depends:
+  - go 1.25.5 h1a1113d_0
+  license: BSD-3-Clause
+  license_family: BSD
+  size: 20346
+  timestamp: 1764700716393
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/go-nocgo-1.25.5-hcff5026_0.conda
+  sha256: 3537b3c53a76693484a45d431568427fa4070b6ac384e668270609af9abef302
+  md5: 5cbdf80979077ad35a264ccd7a2a6d50
+  depends:
+  - go 1.25.5 h06e7c03_0
+  license: BSD-3-Clause
+  license_family: BSD
+  size: 20398
+  timestamp: 1764700845624

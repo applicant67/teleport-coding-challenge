@@ -1,0 +1,225 @@
+package platform
+
+import (
+	"io"
+	"os"
+	"os/exec"
+	"syscall"
+
+	"github.com/ehsaniara/joblet/pkg/logger"
+)
+
+// BasePlatform provides common functionality shared across platforms
+type BasePlatform struct {
+	logger *logger.Logger
+}
+
+// NewBasePlatform creates a new base platform
+func NewBasePlatform() *BasePlatform {
+	return &BasePlatform{
+		logger: logger.New().WithField("component", "platform"),
+	}
+}
+
+// Common OS operations that work the same across platforms
+func (bp *BasePlatform) WriteFile(name string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(name, data, perm)
+}
+
+func (bp *BasePlatform) ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+func (bp *BasePlatform) Remove(path string) error {
+	return os.Remove(path)
+}
+
+func (bp *BasePlatform) Symlink(source string, path string) error {
+	return os.Symlink(source, path)
+}
+
+func (bp *BasePlatform) MkdirAll(dir string, perm os.FileMode) error {
+	return os.MkdirAll(dir, perm)
+}
+
+func (bp *BasePlatform) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
+	return os.OpenFile(name, flag, perm)
+}
+
+func (bp *BasePlatform) Stat(name string) (os.FileInfo, error) {
+	return os.Stat(name)
+}
+
+func (bp *BasePlatform) IsNotExist(err error) bool {
+	return os.IsNotExist(err)
+}
+
+func (bp *BasePlatform) Executable() (string, error) {
+	return os.Executable()
+}
+
+func (bp *BasePlatform) Getpid() int {
+	return os.Getpid()
+}
+
+func (bp *BasePlatform) Exit(code int) {
+	os.Exit(code)
+}
+
+func (bp *BasePlatform) FindProcess(pid int) (*os.Process, error) {
+	return os.FindProcess(pid)
+}
+
+func (bp *BasePlatform) Environ() []string {
+	return os.Environ()
+}
+
+func (bp *BasePlatform) Getenv(key string) string {
+	return os.Getenv(key)
+}
+
+func (bp *BasePlatform) LookPath(file string) (string, error) {
+	return exec.LookPath(file)
+}
+
+// Common syscall operations
+func (bp *BasePlatform) Kill(pid int, sig syscall.Signal) error {
+	return syscall.Kill(pid, sig)
+}
+
+func (bp *BasePlatform) Exec(argv0 string, argv []string, envv []string) error {
+	return syscall.Exec(argv0, argv, envv)
+}
+
+func (bp *BasePlatform) CreateProcessGroup() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		Setpgid: true,
+		Pgid:    0,
+	}
+}
+
+// Common command operations
+func (bp *BasePlatform) CreateCommand(name string, args ...string) *ExecCommand {
+	return &ExecCommand{cmd: exec.Command(name, args...)}
+}
+
+func (bp *BasePlatform) CommandContext(ctx interface{}, name string, args ...string) Command {
+	if ctx == nil {
+		return &ExecCommand{cmd: exec.Command(name, args...)}
+	}
+	// In a real implementation, we'd use context.Context here
+	// For now, just create a regular command
+	return &ExecCommand{cmd: exec.Command(name, args...)}
+}
+
+func (bp *BasePlatform) IsExist(err error) bool {
+	return os.IsExist(err)
+}
+
+func (lp *LinuxPlatform) RemoveAll(dir string) error {
+	return os.RemoveAll(dir)
+}
+
+func (lp *LinuxPlatform) ReadDir(s string) ([]os.DirEntry, error) {
+	return os.ReadDir(s)
+}
+
+// DirExists checks if a directory exists
+func (bp *BasePlatform) DirExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+// FileExists checks if a file exists
+func (bp *BasePlatform) FileExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+// ExecCommand wraps exec.Cmd to implement Command interface
+type ExecCommand struct {
+	cmd *exec.Cmd
+}
+
+func (e *ExecCommand) SetStdin(w interface{}) {
+	e.cmd.Stdin = w.(io.Reader)
+}
+
+func (e *ExecCommand) SetDir(s string) {
+	e.cmd.Dir = s
+}
+
+func (e *ExecCommand) Run() error {
+	return e.cmd.Run()
+}
+
+func (e *ExecCommand) Start() error {
+	return e.cmd.Start()
+}
+
+func (e *ExecCommand) Wait() error {
+	return e.cmd.Wait()
+}
+
+func (e *ExecCommand) Process() Process {
+	if e.cmd.Process == nil {
+		return nil
+	}
+	return &ExecProcess{process: e.cmd.Process}
+}
+
+func (e *ExecCommand) Kill() {
+	if e.cmd.Process == nil {
+		return
+	}
+	_ = e.cmd.Process.Kill()
+}
+
+func (e *ExecCommand) SetExtraFiles(files []*os.File) {
+	e.cmd.ExtraFiles = files
+}
+
+func (e *ExecCommand) SetStdout(w interface{}) {
+	e.cmd.Stdout = w.(io.Writer)
+}
+
+func (e *ExecCommand) SetStderr(w interface{}) {
+	e.cmd.Stderr = w.(io.Writer)
+}
+
+func (e *ExecCommand) SetSysProcAttr(attr *syscall.SysProcAttr) {
+	e.cmd.SysProcAttr = attr
+}
+
+func (e *ExecCommand) SetEnv(env []string) {
+	e.cmd.Env = env
+}
+
+// Output runs the command and returns its combined stdout and stderr
+func (e *ExecCommand) Output() ([]byte, error) {
+	return e.cmd.Output()
+}
+
+// CombinedOutput runs the command and returns its combined stdout and stderr
+func (e *ExecCommand) CombinedOutput() ([]byte, error) {
+	return e.cmd.CombinedOutput()
+}
+
+// ExecProcess wraps os.Process to implement Process interface
+type ExecProcess struct {
+	process *os.Process
+}
+
+func (p *ExecProcess) Pid() int {
+	return p.process.Pid
+}
+
+func (p *ExecProcess) Kill() error {
+	return p.process.Kill()
+}

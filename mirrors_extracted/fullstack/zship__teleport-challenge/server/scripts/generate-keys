@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# Create a CA key, CA certificate, server key, and server certificate. More
+# involved than the usual single self-signed certificate in order to get around
+# Chrome "NET::ERR_CERT_COMMON_NAME_INVALID" warning.
+#
+# References:
+# https://stackoverflow.com/a/27931596
+# https://alexanderzeitler.com/articles/Fixing-Chrome-missing_subjectAltName-selfsigned-cert-openssl/
+# https://www.ibm.com/docs/en/runbook-automation?topic=certificate-generate-root-ca-key
+
+tmpdir=$(mktemp -d)
+
+cleanup_impl() {
+	if [ -n "${tmpdir}" ]; then rm -rf "${tmpdir}"; fi
+}
+
+cleanup() {
+	EXIT_CODE=$?
+	trap - EXIT
+	cleanup_impl
+	if [ -n "$1" ]; then
+		trap - "$1"
+		kill "-${1}" $$
+	fi
+	exit "${EXIT_CODE}"
+}
+
+trap 'cleanup' EXIT
+trap 'cleanup HUP' HUP
+trap 'cleanup TERM' TERM
+trap 'cleanup INT' INT
+
+outdir="$1"
+
+if [ -z "${outdir}" ]; then
+	echo 'Usage: generate-cert DIRECTORY' >&2
+	exit 1
+fi
+
+mkdir -p "${outdir}"
+cd "${outdir}" || exit 1
+
+echo 'Creating CA private key...'
+openssl genrsa -out ca-key.pem 2048
+
+cat <<-EOF > "${tmpdir}/ca.conf"
+[req]
+distinguished_name = dn
+prompt = no
+
+[dn]
+CN = localhost
+EOF
+
+echo 'Creating CA certificate...'
+args=()
+args+=(req)
+args+=(-new)
+args+=(-x509)
+args+=(-sha256)
+args+=(-nodes)
+args+=(-days 3650)
+args+=(-key ca-key.pem)
+args+=(-out ca-cert.pem)
+args+=(-config "${tmpdir}/ca.conf")
+openssl "${args[@]}"
+
+echo 'Creating server private key...'
+openssl genrsa -out server-key.pem 2048
+
+cat <<-EOF > "${tmpdir}/csr.conf"
+[req]
+distinguished_name = dn
+prompt = no
+
+[dn]
+CN = localhost
+EOF
+
+# create certificate signing request
+echo 'Creating server CSR...'
+args=()
+args+=(req)
+args+=(-new)
+args+=(-sha256)
+args+=(-key server-key.pem)
+args+=(-out server-cert.csr)
+args+=(-config "${tmpdir}/csr.conf")
+openssl "${args[@]}"
+
+cat <<-EOF > "${tmpdir}/v3.ext"
+authorityKeyIdentifier = keyid,issuer
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+EOF
+
+echo 'Creating CA-signed server certificate...'
+args=()
+args+=(x509)
+args+=(-req)
+args+=(-sha256)
+args+=(-in server-cert.csr)
+args+=(-CA ca-cert.pem)
+args+=(-CAkey ca-key.pem)
+args+=(-CAcreateserial)
+args+=(-out server-cert.pem)
+args+=(-days 365)
+args+=(-extfile "${tmpdir}/v3.ext")
+openssl "${args[@]}"

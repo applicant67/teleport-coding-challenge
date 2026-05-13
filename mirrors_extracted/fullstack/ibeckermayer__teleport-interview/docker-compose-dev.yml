@@ -1,0 +1,28 @@
+services:
+  frontend-dev:
+    build:
+      context: .
+      dockerfile: frontend/dev.Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - "./frontend/src:/app/src"
+    networks:
+      - teleport-interview-dev
+    container_name: frontend-dev
+    image: frontend-dev
+  backend-dev:
+    build:
+      context: .
+      dockerfile: backend/dev.Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - "./backend:/app"
+    networks:
+      - teleport-interview-dev
+    container_name: backend-dev
+    image: backend-dev
+
+networks:
+  teleport-interview-dev:

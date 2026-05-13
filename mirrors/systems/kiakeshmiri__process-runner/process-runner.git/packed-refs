@@ -1,0 +1,6 @@
+# pack-refs with: peeled fully-peeled sorted 
+d387962c8621170cb7d63ef477c07dfd3099c8af refs/heads/main
+56a3e5cae3195ee00752c18732ae0d944abcd388 refs/heads/rfd
+282d703ec7b9cbd2e87efac05f8276219a2ae267 refs/heads/rfd-code
+56a3e5cae3195ee00752c18732ae0d944abcd388 refs/pull/1/head
+282d703ec7b9cbd2e87efac05f8276219a2ae267 refs/pull/2/head

@@ -1,0 +1,302 @@
+# Unified Joblet Configuration
+# This file configures both joblet (main service) and persist (persistence service)
+#
+# JOBLET_HOME: The installation directory (default: /opt/joblet)
+# All paths below use /opt/joblet as the default JOBLET_HOME.
+#
+# Runtime configuration is in a SEPARATE file: runtime-config.yml
+# The installer automatically selects the correct runtime config for your distro.
+
+version: "3.0"
+
+# ============================================================================
+# JOBLET MAIN SERVICE CONFIGURATION
+# ============================================================================
+
+server:
+  address: "0.0.0.0"
+  port: 50051
+  mode: "server"
+  nodeId: ""  # Will be generated during setup
+
+joblet:
+  defaultCpuLimit: 0            # No CPU limit by default (0 = unlimited)
+  defaultMemoryLimit: 0         # No memory limit by default (0 = unlimited)
+  defaultIoLimit: 0             # No I/O limit by default (0 = unlimited)
+  maxConcurrentJobs: 0          # No job concurrency limit (0 = unlimited)
+  jobTimeout: "0s"              # No job timeout by default (0 = unlimited)
+  cleanupTimeout: "100ms"       # Fast cleanup for performance
+
+cgroup:
+  baseDir: "/sys/fs/cgroup/joblet.slice/joblet.service"
+  namespaceMount: "/sys/fs/cgroup"
+  enableControllers: [ "memory", "cpu", "io", "pids", "cpuset", "devices" ]
+  cleanupTimeout: "100ms"       # Fast cgroup cleanup for performance
+
+# GPU support configuration
+gpu:
+  enabled: false                    # Enable GPU support (default: false, opt-in only)
+  allocation_strategy: "first-fit"  # GPU allocation strategy: first-fit, pack, spread, best-fit
+  cuda_paths:                       # CUDA installation paths to search
+    - "/usr/local/cuda"
+    - "/opt/cuda"
+
+network:
+  enabled: true                     # Enable network isolation (default: true)
+  state_dir: "/opt/joblet/network"
+  default_network: "bridge"
+  allow_custom_networks: true
+  # Network storage configuration - file-based persistence
+  storage:
+    path: "/opt/joblet/network"  # Directory for network state files
+  networks:
+    bridge:
+      cidr: "172.20.0.0/16"
+      bridge_name: "joblet0"
+
+filesystem:
+  baseDir: "/opt/joblet/jobs"
+  tmpDir: "/tmp/job-{JOB_ID}"
+  workspaceDir: "/work"         # Directory for job uploads and execution
+
+grpc:
+  # Production-grade gRPC settings for high-performance traffic
+  maxRecvMsgSize: 134217728        # 128MB - handle large file uploads/downloads
+  maxSendMsgSize: 134217728        # 128MB - handle large responses and streaming
+  maxHeaderListSize: 16777216      # 16MB - handle large metadata/headers
+  keepAliveTime: "10s"             # More frequent keepalives for connection health
+  keepAliveTimeout: "3s"           # Faster timeout detection
+  maxConcurrentStreams: 1000       # High concurrent stream limit
+  connectionTimeout: "10s"         # Connection establishment timeout
+
+logging:
+  level: "INFO"
+  format: "text"
+  output: "stdout"
+
+# Buffer configuration for pub-sub live streaming
+buffers:
+  pubsub_buffer_size: 10000   # Pub-sub channel buffer for high-throughput production traffic
+  chunk_size: 1048576         # 1MB chunks for optimal streaming performance
+
+# IPC configuration for persist integration (joblet -> persist communication)
+# IMPORTANT: This setting controls BOTH persistence AND buffering behavior:
+#   enabled: true  - Logs/metrics buffered in memory + forwarded to persist (gap prevention enabled)
+#   enabled: false - NO buffering (live streaming only, no persistence, no historical data)
+# Disabling persist eliminates unbounded memory growth but loses historical log/metric access
+#
+# NOTE: The socket path defined here is the SINGLE SOURCE OF TRUTH.
+#       persist.ipc inherits this socket path automatically (Go best practice: avoid duplication)
+ipc:
+  enabled: true                                   # Enable IPC to persist service + in-memory buffering
+  socket: "/opt/joblet/run/persist-ipc.sock"      # Unix socket path (shared with persist.ipc)
+  buffer_size: 10000                              # Client: message buffer size
+  reconnect_delay: "5s"                           # Client: reconnection retry delay
+  max_reconnects: 0                               # Client: max reconnection attempts (0 = infinite)
+
+# Volume management configuration
+volumes:
+  base_path: "/opt/joblet/volumes"  # Base directory for all volumes
+  default_disk_quota_bytes: 1048576  # Default disk quota for jobs without volumes (1MB)
+
+monitoring:
+  system_interval: "10s"
+  cloud_detection: true
+
+# Telemetry configuration for metrics collection and eBPF visibility
+telemetry:
+  # Resource metrics collection interval (CPU, memory, disk I/O, network)
+  # Lower intervals provide more granular data but increase overhead
+  metrics_interval: "5s"     # Default: 5 seconds (valid range: 1s-60s)
+
+  # eBPF activity tracking (Linux 5.8+ required)
+  # Captures process executions, network connections, memory mappings
+  ebpf_enabled: true         # Default: true (disable to reduce overhead)
+
+  # List of enabled eBPF event types (omit or leave empty for all)
+  # Valid: exec, connect, accept, mmap, mprotect, file, socket_data
+  # Disable high-volume events (mmap, file, socket_data) to reduce overhead
+  event_types: []            # Empty = all enabled (default)
+  # Example - enable only low-volume events:
+  # event_types:
+  #   - exec
+  #   - connect
+  #   - accept
+
+# Security section will be added by certs_gen_embedded.sh
+# DO NOT ADD CERTIFICATES HERE - they will be embedded automatically
+
+# ============================================================================
+# JOBLET-PERSIST SERVICE CONFIGURATION
+# Persistence service runs as subprocess and INHERITS parent configurations:
+#   - logging (level, format, output)
+#   - security (TLS certificates)
+#   - base paths
+#
+# Persist can OVERRIDE specific settings while inheriting the rest
+# ============================================================================
+
+persist:
+  server:
+    grpc_socket: "/opt/joblet/run/persist-grpc.sock"  # Unix socket for gRPC queries (TCP disabled)
+    max_connections: 500       # Override: Different connection limit
+    # TLS: Disabled for Unix socket (pure Linux IPC)
+
+  ipc:
+    # socket: inherited from top-level ipc.socket (single source of truth)
+    max_message_size: 134217728  # 128MB - handle large batches
+    read_buffer: 8388608         # 8MB
+
+    # Write pipeline settings (for high-throughput eBPF events)
+    buffer_size: 100000          # Pipeline buffer size (default: 100k messages)
+    worker_count: 4              # Parallel write workers (default: 4)
+    batch_size: 100              # Max messages per batch before flush (default: 100)
+    backpressure_timeout: 5      # Seconds to wait when pipeline full (default: 5)
+    backpressure_mode: "block"   # "block" (default, no data loss) or "drop" (lossy but faster)
+
+  storage:
+    # Storage backend type: "local", "cloudwatch", or "s3"
+    # Auto-detection: When installed on EC2, the installer can set this to "cloudwatch"
+    type: "local"
+
+    # LOCAL storage configuration (filesystem-based)
+    # Format: JSONL (logs) or gzipped JSONL (metrics/events)
+    local:
+      logs:
+        directory: "/opt/joblet/logs"      # Inherited from parent's log dir
+
+      metrics:
+        directory: "/opt/joblet/metrics"   # Inherited from parent's metrics dir
+
+      events:
+        directory: "/opt/joblet/events"    # eBPF telematics events storage
+
+      # File handle cache settings (prevents unbounded resource growth)
+      max_open_files: 1000           # Max file handles per type (default: 1000)
+      file_handle_ttl: 300           # TTL in seconds for idle handles (default: 300)
+
+    # AWS CLOUDWATCH storage configuration (cloud-native)
+    # Automatically configured when running on EC2 instances
+    # Log groups organized by node: {log_group_prefix}/{nodeId}/jobs/{jobId}
+    #
+    # AUTHENTICATION: Uses AWS default credential chain (secure, no credentials in config)
+    #   1. IAM Role / Instance Profile (recommended for EC2)
+    #   2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+    #   3. Shared credentials file (~/.aws/credentials)
+    #
+    cloudwatch:
+      region: ""                              # AWS region (empty = auto-detect from EC2 metadata)
+      log_group_prefix: "/joblet"             # CloudWatch Logs group prefix (nodeId automatically inserted)
+      metric_namespace: "Joblet/Jobs"         # CloudWatch Metrics namespace
+      metric_dimensions:                      # Additional metric dimensions (optional)
+      # Environment: "production"
+      # Cluster: "main"
+
+      # Batch settings for CloudWatch API
+      log_batch_size: 100                     # Max log events per batch (CloudWatch limit: 10,000)
+      metric_batch_size: 20                   # Max metric data points per batch (CloudWatch limit: 1,000)
+
+      # Log retention settings (controls storage costs)
+      log_retention_days: 7                   # Log retention in days (default: 7)
+      # Valid values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653
+      # 0 or not set = default to 7 days
+      # -1 = never expire (infinite retention - expensive!)
+      #
+      # Cost optimization examples:
+      #   log_retention_days: 1    # Development (minimal storage cost)
+      #   log_retention_days: 7    # Default (balanced)
+      #   log_retention_days: 30   # Production (standard)
+      #   log_retention_days: 365  # Compliance (1 year)
+      #   log_retention_days: -1   # Never expire (not recommended)
+
+    # AWS S3 storage configuration (object storage)
+    # Best for: Long-term archival, cross-region replication, cost-effective storage
+    #
+    # AUTHENTICATION: Uses AWS default credential chain (secure, no credentials in config)
+    #   1. IAM Role / Instance Profile (recommended for EC2)
+    #   2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+    #   3. Shared credentials file (~/.aws/credentials)
+    #
+    s3:
+      region: ""                              # AWS region (empty = auto-detect from EC2 metadata)
+      bucket: ""                              # S3 bucket name (required when type: "s3")
+      key_prefix: "jobs/"                     # Key prefix for all objects (default: "jobs/")
+      # Object paths: {key_prefix}{nodeId}/{jobId}/{streamType}/{timestamp}.jsonl.gz
+
+      # Buffering settings (data is buffered locally before upload)
+      flush_interval: 30                      # Seconds between flushes (default: 30)
+      flush_threshold: 5242880                # Flush when buffer reaches this size in bytes (default: 5MB)
+      max_buffer_size: 52428800               # Max buffer size before blocking (default: 50MB)
+
+      # Storage class for cost optimization
+      storage_class: "STANDARD"               # Options: STANDARD, STANDARD_IA, ONEZONE_IA, GLACIER, DEEP_ARCHIVE
+      # Cost optimization examples:
+      #   STANDARD       - Frequently accessed data (highest cost, lowest latency)
+      #   STANDARD_IA    - Infrequently accessed (lower cost, retrieval fee)
+      #   ONEZONE_IA     - Single AZ, infrequent access (cheapest for non-critical data)
+      #   GLACIER        - Archive storage (very low cost, minutes to hours retrieval)
+      #   DEEP_ARCHIVE   - Long-term archive (lowest cost, 12+ hours retrieval)
+
+      # Server-side encryption
+      sse: ""                                 # Server-side encryption: "" (none), "AES256", or "aws:kms"
+      kms_key_id: ""                          # KMS key ID if sse="aws:kms"
+
+      # IMPORTANT: Lifecycle rules must be configured MANUALLY on the S3 bucket
+      # The code does NOT configure these - they are reference values for your bucket policy
+      #
+      # Example AWS CLI command to set lifecycle rules:
+      #   aws s3api put-bucket-lifecycle-configuration --bucket YOUR_BUCKET \
+      #     --lifecycle-configuration file://lifecycle.json
+      #
+      # Example lifecycle.json:
+      # {
+      #   "Rules": [{
+      #     "ID": "JobletArchiveRule",
+      #     "Status": "Enabled",
+      #     "Filter": {"Prefix": "jobs/"},
+      #     "Transitions": [{"Days": 30, "StorageClass": "GLACIER"}],
+      #     "Expiration": {"Days": 365}
+      #   }]
+      # }
+
+# Job State Persistence Configuration (Optional - for EC2/Cloud deployments)
+# When enabled, job states survive joblet restarts
+state:
+  backend: "memory"  # Options: "memory", "dynamodb", "local"
+  socket: "/opt/joblet/run/state-ipc.sock"
+  buffer_size: 10000
+  reconnect_delay: "5s"
+
+  # Connection pool configuration (for high-concurrency scenarios with 1000+ jobs)
+  pool:
+    size: 20                    # Max connections in pool (default: 20)
+    read_timeout: "10s"         # Timeout for read operations (default: 10s)
+    dial_timeout: "5s"          # Timeout for establishing new connections (default: 5s)
+    max_idle_time: "30s"        # Max idle time before health check (default: 30s)
+    health_check_timeout: "500ms"  # Timeout for connection health checks (default: 500ms)
+    shutdown_timeout: "5s"      # Max time to wait for graceful shutdown (default: 5s)
+
+  # Client retry configuration (for transient failures)
+  client:
+    max_retries: 3              # Max retry attempts for transient failures (default: 3)
+    retry_base_delay: "100ms"   # Initial delay between retries, doubles each attempt (default: 100ms)
+    retry_max_delay: "2s"       # Maximum delay between retries (default: 2s)
+    connect_timeout: "5s"       # Timeout for initial connection test (default: 5s)
+
+  # Local storage configuration (when backend: "local")
+  local:
+    directory: "/opt/joblet/state"  # Directory for local state storage
+    sync_interval: "5s"             # How often to sync to disk (default: 5s)
+
+  storage:
+    # DynamoDB configuration (when backend: "dynamodb")
+    dynamodb:
+      region: ""  # Auto-detect from EC2 metadata if empty
+      table_name: "joblet-jobs"
+      ttl_enabled: true
+      ttl_attribute: "expiresAt"
+      ttl_days: 30  # Auto-delete completed jobs after 30 days
+      read_capacity: 5   # 0 for on-demand pricing
+      write_capacity: 5  # 0 for on-demand pricing
+      batch_size: 25
+      batch_interval: "100ms"

@@ -1,0 +1,254 @@
+//go:build linux
+
+package isolation
+
+import (
+	"fmt"
+	"runtime"
+	"strconv"
+	"strings"
+
+	"github.com/ehsaniara/joblet/internal/joblet/core/filesystem"
+
+	"github.com/ehsaniara/joblet/pkg/config"
+	"github.com/ehsaniara/joblet/pkg/errors"
+	"github.com/ehsaniara/joblet/pkg/logger"
+	"github.com/ehsaniara/joblet/pkg/platform"
+)
+
+// Isolator provides job isolation functionality
+type Isolator struct {
+	platform   platform.Platform
+	filesystem *filesystem.Isolator
+	logger     *logger.Logger
+	config     *config.Config
+}
+
+// NewIsolator creates a new isolator with the given platform
+func NewIsolator(p platform.Platform, logger *logger.Logger) *Isolator {
+	cfg, _, _ := config.LoadConfig()
+
+	return &Isolator{
+		platform:   p,
+		filesystem: filesystem.NewIsolator(cfg, p),
+		logger:     logger.WithField("component", "isolator"),
+		config:     cfg,
+	}
+}
+
+// Setup sets up platform-specific job isolation
+func Setup(logger *logger.Logger) error {
+	p := platform.NewPlatform()
+	isolator := NewIsolator(p, logger)
+	return isolator.Setup()
+}
+
+// Setup sets up platform-specific job isolation using the platform abstraction
+func (i *Isolator) Setup() error {
+	switch runtime.GOOS {
+	case "linux":
+		return i.setupLinux()
+	case "darwin":
+		return i.setupDarwin()
+	default:
+		return fmt.Errorf("%w: %s", errors.ErrUnsupportedPlatform, runtime.GOOS)
+	}
+}
+
+// setupLinux sets up Linux-specific isolation using platform abstraction
+func (i *Isolator) setupLinux() error {
+	pid := i.platform.Getpid()
+	// Setting up Linux isolation with filesystem isolation
+
+	// Only PID 1 should set up isolation
+	if pid != 1 {
+		i.logger.Debug("not PID 1, skipping isolation setup", "pid", pid)
+		return nil
+	}
+
+	// Make mounts private
+	if err := i.makePrivate(); err != nil {
+		i.logger.Warn("could not make mounts private", "error", err)
+		// Continue - not always required
+	}
+
+	// Setup filesystem isolation BEFORE remounting /proc
+	if err := i.setupFilesystemIsolation(); err != nil {
+		i.logger.Error("filesystem isolation setup failed", "error", err)
+		return errors.WrapFilesystemError("", "isolation", err)
+	}
+
+	// Remount /proc (this will now be inside the chroot)
+	if err := i.remountProc(); err != nil {
+		i.logger.Error("failed to remount /proc", "error", err)
+		return errors.WrapFilesystemError("/proc", "remount", err)
+	}
+
+	// Verify isolation
+	if err := i.verifyIsolation(); err != nil {
+		i.logger.Warn("isolation verification failed", "error", err)
+		// Continue - isolation might still be partial
+	}
+
+	// Linux isolation setup completed successfully
+	return nil
+}
+
+// setupDarwin sets up macOS-specific isolation (minimal)
+func (i *Isolator) setupDarwin() error {
+	i.logger.Debug("macOS isolation setup (minimal - no namespaces available)")
+	// macOS doesn't have Linux namespaces, so this is mostly a no-op
+	return nil
+}
+
+// setupFilesystemIsolation sets up filesystem isolation for the job
+func (i *Isolator) setupFilesystemIsolation() error {
+	// Setting up filesystem isolation
+
+	jobID := i.platform.Getenv("JOB_ID")
+	if jobID == "" {
+		return errors.WrapConfigError("isolation", "JOB_ID", fmt.Errorf("environment variable not set"))
+	}
+
+	// Create isolated filesystem for this job
+	// Creating job filesystem
+	jobFS, e := i.filesystem.CreateJobFilesystem(jobID)
+	if e != nil {
+		return errors.WrapFilesystemError(jobID, "create", e)
+	}
+	// Job filesystem created
+
+	// Set up the filesystem isolation (chroot, mounts, etc.)
+	// Check if this is a builder job by looking at job type from service layer
+	jobType := i.platform.Getenv("JOB_TYPE")
+	isBuilderJob := jobType == "runtime-build"
+
+	if isBuilderJob {
+		i.logger.Info("setting up builder filesystem for runtime build job", "job_uuid", jobID)
+		if err := jobFS.SetupBuilder(); err != nil {
+			return errors.WrapFilesystemError("builder", "setup", err)
+		}
+		// Builder filesystem setup completed
+	} else {
+		// Standard job setup
+		// Note: jobFS.Setup() handles runtime mounting internally before chroot
+		// Setting up standard job filesystem
+		if err := jobFS.Setup(); err != nil {
+			return errors.WrapFilesystemError(jobID, "setup", err)
+		}
+		// Filesystem setup completed
+	}
+
+	// Filesystem isolation setup completed successfully
+	return nil
+}
+
+// makePrivate makes mounts private using platform abstraction
+func (i *Isolator) makePrivate() error {
+	// Making mounts private
+
+	// Use platform constants and helper method
+	err := i.platform.Mount("", "/", "", 0x40000|0x4000, "") // 0x40000|0x4000 for platform.MountPrivate|platform.MountRecursive
+	if err != nil {
+		return errors.WrapFilesystemError("", "mount", err)
+	}
+
+	// Mounts made private
+	return nil
+}
+
+// remountProc remounts /proc using platform abstraction (now within chroot)
+func (i *Isolator) remountProc() error {
+	// Remounting /proc within isolated filesystem
+
+	// We're now inside the chroot, so /proc refers to the chrooted /proc
+	// Ensure /proc directory exists
+	if err := i.platform.MkdirAll("/proc", 0755); err != nil {
+		i.logger.Debug("failed to create /proc directory", "error", err)
+		// Continue anyway - it might already exist
+	}
+
+	// Lazy unmount existing /proc using platform helper
+	// This may fail normally if /proc is not mounted, which is acceptable
+	_ = i.platform.Unmount("/proc", 0x2) // 0x2 for platform.UnmountDetach
+
+	// Mount new proc using platform abstraction
+	if err := i.platform.Mount("proc", "/proc", "proc", 0, ""); err != nil {
+		i.logger.Error("platform proc mount failed (within chroot)", "error", err)
+		return errors.WrapFilesystemError("/proc", "mount", err)
+	}
+
+	// /proc remounted successfully
+	return nil
+}
+
+// verifyIsolation checks that isolation worked using platform abstraction
+func (i *Isolator) verifyIsolation() error {
+	// Verifying isolation effectiveness
+
+	// Check PID 1 in our namespace using platform abstraction
+	if comm, err := i.platform.ReadFile("/proc/1/comm"); err == nil {
+		pid1Process := strings.TrimSpace(string(comm))
+		// PID 1 check passed
+
+		// In isolated namespace, PID 1 should be either:
+		// - "joblet" (original binary name)
+		// - "init" (renamed for security)
+		// - The actual command after exec (e.g., "ps", "bash", etc.)
+		validPid1Names := []string{"joblet", "init", "systemd"}
+
+		isValid := false
+		for _, validName := range validPid1Names {
+			if strings.Contains(pid1Process, validName) {
+				isValid = true
+				break
+			}
+		}
+
+		if !isValid {
+			// Check if it's the user's command (which is actually good!)
+			// If PID 1 is the user's command, it means exec worked perfectly
+			i.logger.Debug("PID 1 is user command (exec successful)",
+				"process", pid1Process)
+		}
+	}
+
+	// Count visible processes using platform abstraction
+	entries, err := i.readProcDir()
+	if err != nil {
+		return errors.WrapFilesystemError("/proc", "read", err)
+	}
+
+	pidCount := 0
+	for _, entry := range entries {
+		if _, err := strconv.Atoi(entry); err == nil {
+			pidCount++
+		}
+	}
+
+	// Isolation verified - process visibility limited
+
+	// If we can only see a few processes, isolation is working
+	if pidCount > 100 {
+		i.logger.Warn("many processes visible, isolation may be incomplete",
+			"count", pidCount)
+	}
+
+	return nil
+}
+
+// readProcDir reads /proc directory entries using platform abstraction
+func (i *Isolator) readProcDir() ([]string, error) {
+	// For now, we'll use a simple approach - this could be extended to the platform interface
+	entries := []string{}
+
+	// Try to read common PID ranges to get an estimate
+	for pid := 1; pid <= 1000; pid++ {
+		procPath := fmt.Sprintf("/proc/%d", pid)
+		if _, err := i.platform.Stat(procPath); err == nil {
+			entries = append(entries, fmt.Sprintf("%d", pid))
+		}
+	}
+
+	return entries, nil
+}

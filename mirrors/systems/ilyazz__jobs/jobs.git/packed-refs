@@ -1,0 +1,13 @@
+# pack-refs with: peeled fully-peeled sorted 
+828c570f31c1933bc070a63394ccf56bb09f4a86 refs/heads/certs
+87501ef31957b04d2cf8386b7955f7744be03874 refs/heads/core
+d517e158d602b67d4c0a1203e7a7c7a5de9dd81b refs/heads/master
+37faaacb871967420625798703e8eccf36fbd060 refs/heads/proto
+7eb4e74d662fd5bce47d37636e74d9a6ac5834f4 refs/heads/rfd/0001-job-service
+d239b351a887eab0fc4e7fe005ec11022625f98d refs/heads/server
+7eb4e74d662fd5bce47d37636e74d9a6ac5834f4 refs/pull/2/head
+87501ef31957b04d2cf8386b7955f7744be03874 refs/pull/3/head
+fba470129c7ef548ee60b93885c3aa452ba781ec refs/pull/3/merge
+37faaacb871967420625798703e8eccf36fbd060 refs/pull/4/head
+828c570f31c1933bc070a63394ccf56bb09f4a86 refs/pull/5/head
+d239b351a887eab0fc4e7fe005ec11022625f98d refs/pull/6/head

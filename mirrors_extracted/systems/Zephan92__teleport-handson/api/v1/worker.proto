@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package worker;
+
+option go_package = "github.com/teleport-handson/api/v1";
+
+import "google/protobuf/timestamp.proto";
+
+service JobWorker {
+  // Starts a new isolated process
+  rpc Start(StartRequest) returns (StartResponse);
+  
+  // Terminates a running process
+  rpc Stop(StopRequest) returns (StopResponse);
+  
+  // Returns high-level metadata and resource usage
+  rpc Status(StatusRequest) returns (StatusResponse);
+  
+  // Streams interleaved stdout/stderr with replay capability
+  rpc Stream(StreamRequest) returns (stream LogChunk);
+}
+
+message StartRequest {
+  // Command is the path to the executable to be run.
+  string command = 1;
+  // Args is the list of arguments to be passed to the executable.
+  repeated string args = 2;
+  // WorkingDirectory is the path where the process will execute.
+  string working_directory = 3;
+}
+
+message StartResponse {
+  // JobID is the unique identifier for the started job.
+  string job_id = 1;
+  // Status indicates the initial state of the job (usually RUNNING).
+  string status = 2;
+  // CreatedAt is the timestamp when the job was successfully initiated.
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message StopRequest {
+  // JobID is the unique identifier of the job to stop.
+  string job_id = 1;
+}
+
+message StopResponse {
+  // Message provides a human-readable result of the stop operation.
+  string message = 1;
+}
+
+message StatusRequest {
+  // JobID is the unique identifier of the job to query.
+  string job_id = 1;
+}
+
+// Resource limits to be enforced via Cgroups v2
+message ResourceLimits {
+  // MemoryBytes is the maximum physical memory the process tree can consume.
+  uint64 memory_bytes = 1;
+  // CPUPercent is the maximum CPU usage allowed (e.g., 0.5 for 50% of a core).
+  double cpu_percent = 2; 
+  // DiskReadBPS is the maximum read throughput in bytes per second.
+  uint32 disk_read_bps = 3;
+  // DiskWriteBPS is the maximum write throughput in bytes per second.
+  uint32 disk_write_bps = 4;
+}
+
+message StatusResponse {
+  // Job Info
+
+  // JobID is the unique identifier for the job.
+  string job_id = 1;
+  // Owner is the Common Name (CN) of the client who started the job.
+  string owner = 2;
+  // Command is the path to the executable.
+  string command = 3;
+  // Args is the list of arguments passed to the executable.
+  repeated string args = 4;
+
+  // Lifecycle
+  enum JobStatus {
+    // StatusUnspecified indicates the status is unspecified.
+    STATUS_UNSPECIFIED = 0;
+    // Running indicates the process has started and is currently active.
+    RUNNING = 1;
+    // Stopped indicates the process was manually terminated by a user request.
+    STOPPED = 2;
+    // Completed indicates the process exited on its own with a zero exit code.
+    COMPLETED = 3;
+    // Failed indicates the process exited with a non-zero exit code or system error.
+    FAILED = 4;
+  }
+  // Status is the current machine-state of the job.
+  JobStatus status = 5;
+  // StartedAt is the timestamp when the process started.
+  google.protobuf.Timestamp started_at = 6;
+  // EndedAt is the timestamp when the process ended (if applicable).
+  optional google.protobuf.Timestamp ended_at = 7;
+  // ExitCode is the exit code returned by the process upon termination.
+  int32 exit_code = 8;                    
+
+  // Constraints
+
+  // Limits defines the resource boundaries applied to the job.
+  ResourceLimits limits = 9;
+}
+
+message StreamRequest {
+  // JobID is the unique identifier of the job to stream logs from.
+  string job_id = 1;
+}
+
+message LogChunk {
+  // Data contains the raw bytes from the process output.
+  bytes data = 1;
+  // Distinguishes between output streams
+  enum Source {
+    // Zero value is reserved for "not specified" to avoid ambiguity
+    SOURCE_UNSPECIFIED = 0;
+    STDOUT = 1;
+    STDERR = 2;
+  }
+  // Source indicates whether the data came from stdout or stderr.
+  Source source = 2;
+  // Timestamp is the time when the output was captured.
+  google.protobuf.Timestamp timestamp = 3;
+}

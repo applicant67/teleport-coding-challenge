@@ -1,0 +1,212 @@
+package storage
+
+import (
+	"testing"
+
+	ipcpb "github.com/ehsaniara/joblet/internal/proto/gen/ipc"
+	"github.com/ehsaniara/joblet/persist/internal/config"
+	"github.com/ehsaniara/joblet/pkg/logger"
+)
+
+func TestNewBackend_Local(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.StorageConfig{
+		Type: "local",
+		Local: config.LocalConfig{
+			Logs: config.LogStorageConfig{
+				Directory: tmpDir + "/logs",
+			},
+			Metrics: config.MetricStorageConfig{
+				Directory: tmpDir + "/metrics",
+			},
+			Events: config.EventStorageConfig{
+				Directory: tmpDir + "/events",
+			},
+		},
+	}
+
+	log := logger.New()
+
+	backend, err := NewBackend(cfg, "test-node", log)
+	if err != nil {
+		t.Fatalf("Failed to create local backend: %v", err)
+	}
+
+	if backend == nil {
+		t.Fatal("Expected backend to be created, got nil")
+	}
+
+	defer backend.Close()
+
+	// Verify it's a LocalBackend
+	if _, ok := backend.(*LocalBackend); !ok {
+		t.Error("Expected LocalBackend type")
+	}
+}
+
+func TestNewBackend_CloudWatch_RequiresConfig(t *testing.T) {
+	// CloudWatch backend is now implemented but requires proper configuration
+	// This test verifies it initializes (though it may fail without AWS credentials)
+	cfg := &config.StorageConfig{
+		Type: "cloudwatch",
+		CloudWatch: config.CloudWatchConfig{
+			Region: "us-east-1", // Use specific region to avoid auto-detection
+		},
+	}
+
+	log := logger.New()
+
+	// Backend may fail due to missing AWS credentials, but should not return "not implemented"
+	_, err := NewBackend(cfg, "test-node", log)
+	if err != nil && err.Error() == "CloudWatch backend not implemented yet (v2.0)" {
+		t.Error("CloudWatch backend should be implemented")
+	}
+	// Note: We don't fail on other errors as they may be due to missing AWS credentials in test environment
+}
+
+func TestNewBackend_S3_RequiresConfig(t *testing.T) {
+	// S3 backend is now implemented but requires proper configuration
+	cfg := &config.StorageConfig{
+		Type: "s3",
+		S3: config.S3Config{
+			Region: "us-east-1",
+			Bucket: "test-bucket",
+		},
+	}
+
+	log := logger.New()
+
+	// Backend may fail due to missing AWS credentials, but should not return "not implemented"
+	_, err := NewBackend(cfg, "test-node", log)
+	if err != nil && err.Error() == "S3 backend not implemented yet (v2.0)" {
+		t.Error("S3 backend should be implemented")
+	}
+	// Note: We don't fail on other errors as they may be due to missing AWS credentials in test environment
+}
+
+func TestNewBackend_Unknown(t *testing.T) {
+	cfg := &config.StorageConfig{
+		Type: "unknown-backend",
+	}
+
+	log := logger.New()
+
+	_, err := NewBackend(cfg, "test-node", log)
+	if err == nil {
+		t.Error("Expected error for unknown backend type")
+	}
+
+	expectedError := "unknown storage backend type: unknown-backend"
+	if err.Error() != expectedError {
+		t.Errorf("Expected error '%s', got: %v", expectedError, err)
+	}
+}
+
+func TestLogQuery_Fields(t *testing.T) {
+	startTime := int64(1000)
+	endTime := int64(2000)
+
+	query := &LogQuery{
+		JobUUID:   "test-job",
+		StartTime: &startTime,
+		EndTime:   &endTime,
+		Limit:     100,
+		Offset:    10,
+		Filter:    "error",
+	}
+
+	if query.JobUUID != "test-job" {
+		t.Errorf("Expected JobUUID 'test-job', got '%s'", query.JobUUID)
+	}
+
+	if *query.StartTime != 1000 {
+		t.Errorf("Expected StartTime 1000, got %d", *query.StartTime)
+	}
+
+	if *query.EndTime != 2000 {
+		t.Errorf("Expected EndTime 2000, got %d", *query.EndTime)
+	}
+
+	if query.Limit != 100 {
+		t.Errorf("Expected Limit 100, got %d", query.Limit)
+	}
+
+	if query.Offset != 10 {
+		t.Errorf("Expected Offset 10, got %d", query.Offset)
+	}
+
+	if query.Filter != "error" {
+		t.Errorf("Expected Filter 'error', got '%s'", query.Filter)
+	}
+}
+
+func TestMetricQuery_Fields(t *testing.T) {
+	startTime := int64(1000)
+	endTime := int64(2000)
+
+	query := &MetricQuery{
+		JobUUID:     "test-job",
+		StartTime:   &startTime,
+		EndTime:     &endTime,
+		Aggregation: "avg",
+		Limit:       50,
+		Offset:      5,
+	}
+
+	if query.JobUUID != "test-job" {
+		t.Errorf("Expected JobUUID 'test-job', got '%s'", query.JobUUID)
+	}
+
+	if *query.StartTime != 1000 {
+		t.Errorf("Expected StartTime 1000, got %d", *query.StartTime)
+	}
+
+	if *query.EndTime != 2000 {
+		t.Errorf("Expected EndTime 2000, got %d", *query.EndTime)
+	}
+
+	if query.Aggregation != "avg" {
+		t.Errorf("Expected Aggregation 'avg', got '%s'", query.Aggregation)
+	}
+
+	if query.Limit != 50 {
+		t.Errorf("Expected Limit 50, got %d", query.Limit)
+	}
+
+	if query.Offset != 5 {
+		t.Errorf("Expected Offset 5, got %d", query.Offset)
+	}
+}
+
+func TestEventReader_LogLine_Channels(t *testing.T) {
+	reader := NewEventReader[*ipcpb.LogLine](10)
+
+	if reader.Channel == nil {
+		t.Error("Expected Channel to be initialized")
+	}
+
+	if reader.Error == nil {
+		t.Error("Expected Error channel to be initialized")
+	}
+
+	if reader.Done == nil {
+		t.Error("Expected Done channel to be initialized")
+	}
+}
+
+func TestEventReader_Metric_Channels(t *testing.T) {
+	reader := NewEventReader[*ipcpb.Metric](10)
+
+	if reader.Channel == nil {
+		t.Error("Expected Channel to be initialized")
+	}
+
+	if reader.Error == nil {
+		t.Error("Expected Error channel to be initialized")
+	}
+
+	if reader.Done == nil {
+		t.Error("Expected Done channel to be initialized")
+	}
+}

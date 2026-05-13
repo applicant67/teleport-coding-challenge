@@ -1,0 +1,198 @@
+#!/bin/bash
+set -e
+
+# JOBLET_HOME defines the installation directory (default: /opt/joblet)
+JOBLET_HOME="${JOBLET_HOME:-/opt/joblet}"
+export JOBLET_HOME
+
+# Source debconf library
+. /usr/share/debconf/confmodule
+
+# Source common installation functions
+if [ -f ${JOBLET_HOME}/scripts/common-install-functions.sh ]; then
+    . ${JOBLET_HOME}/scripts/common-install-functions.sh
+else
+    echo "ERROR: Common installation functions not found!"
+    exit 1
+fi
+
+# Debian-specific configuration with debconf support
+get_configuration_debian() {
+    # Configuration precedence (highest to lowest):
+    # 1. Environment variables (for automated deployments)
+    # 2. Debconf (for interactive installations)
+    # 3. Auto-detection (fallback)
+
+    print_info "Loading configuration..."
+
+    # === Priority 1: Environment Variables ===
+    if [ -n "$JOBLET_SERVER_ADDRESS" ] || [ -n "$JOBLET_CERT_INTERNAL_IP" ]; then
+        print_info "Configuration source: Environment variables"
+
+        JOBLET_SERVER_ADDRESS="${JOBLET_SERVER_ADDRESS:-0.0.0.0}"
+        JOBLET_SERVER_PORT="${JOBLET_SERVER_PORT:-50051}"
+
+    # === Priority 2: Debconf (Debian-specific) ===
+    elif command -v db_get >/dev/null 2>&1; then
+        print_info "Configuration source: Debconf (interactive)"
+
+        db_get joblet/server_address || true
+        JOBLET_SERVER_ADDRESS="${RET:-0.0.0.0}"
+
+        db_get joblet/server_port || true
+        JOBLET_SERVER_PORT="${RET:-50051}"
+
+        db_get joblet/cert_internal_ip || true
+        JOBLET_CERT_INTERNAL_IP="${RET}"
+
+        db_get joblet/cert_public_ip || true
+        JOBLET_CERT_PUBLIC_IP="${RET}"
+
+        db_get joblet/cert_domain || true
+        JOBLET_CERT_DOMAIN="${RET}"
+
+    # === Priority 3: Use common function ===
+    else
+        # Call the common get_configuration function
+        get_configuration
+        return 0
+    fi
+
+    # === Auto-detect internal IP if not set (all paths) ===
+    if [ -z "$JOBLET_CERT_INTERNAL_IP" ]; then
+        JOBLET_CERT_INTERNAL_IP=$(detect_internal_ip)
+        print_info "Auto-detected internal IP: $JOBLET_CERT_INTERNAL_IP"
+    fi
+
+    # === Set primary certificate address (used for CN) ===
+    JOBLET_CERT_PRIMARY=${JOBLET_CERT_PRIMARY:-$JOBLET_CERT_INTERNAL_IP}
+
+    # === Build SAN list for certificate ===
+    if [ -z "$JOBLET_ADDITIONAL_NAMES" ]; then
+        JOBLET_ADDITIONAL_NAMES="localhost"
+
+        if [ -n "$JOBLET_CERT_INTERNAL_IP" ] && [ "$JOBLET_CERT_INTERNAL_IP" != "$JOBLET_CERT_PRIMARY" ]; then
+            JOBLET_ADDITIONAL_NAMES="$JOBLET_ADDITIONAL_NAMES,$JOBLET_CERT_INTERNAL_IP"
+        fi
+
+        if [ -n "$JOBLET_CERT_PUBLIC_IP" ]; then
+            JOBLET_ADDITIONAL_NAMES="$JOBLET_ADDITIONAL_NAMES,$JOBLET_CERT_PUBLIC_IP"
+        fi
+
+        if [ -n "$JOBLET_CERT_DOMAIN" ]; then
+            JOBLET_ADDITIONAL_NAMES="$JOBLET_ADDITIONAL_NAMES,$JOBLET_CERT_DOMAIN"
+        fi
+    fi
+
+    print_success "Configuration loaded successfully"
+}
+
+case "$1" in
+    configure)
+        # Display system changes warning
+        display_system_changes_warning
+
+        print_info "🔧 Configuring Joblet Service with Enhanced Certificate Support..."
+        echo
+
+        # Set basic permissions first
+        chown -R root:root ${JOBLET_HOME}
+        chmod 755 ${JOBLET_HOME}
+        chmod 755 ${JOBLET_HOME}/bin
+        chmod 755 ${JOBLET_HOME}/bin/joblet
+        chmod 755 ${JOBLET_HOME}/bin/rnx
+        chmod 755 ${JOBLET_HOME}/bin/persist
+        chmod 755 ${JOBLET_HOME}/bin/state
+        chmod 755 ${JOBLET_HOME}/scripts
+        chmod 644 ${JOBLET_HOME}/scripts/joblet-config-template.yml
+        chmod 644 ${JOBLET_HOME}/scripts/rnx-config-template.yml
+        chmod +x /usr/local/bin/certs_gen_embedded.sh
+
+        mkdir -p ${JOBLET_HOME}/config
+        chmod 755 ${JOBLET_HOME}/config  # Directory needs to be accessible for rnx client
+
+        # Select and install the appropriate runtime config for this distro
+        select_runtime_config ${JOBLET_HOME}/scripts ${JOBLET_HOME}/config
+
+        # Create symlinks
+        if [ ! -L /usr/bin/rnx ]; then
+            ln -sf ${JOBLET_HOME}/bin/rnx /usr/bin/rnx
+        fi
+
+        if [ ! -L /usr/local/bin/rnx ]; then
+            ln -sf ${JOBLET_HOME}/bin/rnx /usr/local/bin/rnx
+        fi
+
+        get_configuration_debian
+
+        # Detect AWS environment and display information
+        detect_aws_environment
+
+        print_info "Configuration Summary:$EC2_INFO"
+        echo "  gRPC Server Bind: $JOBLET_SERVER_ADDRESS:$JOBLET_SERVER_PORT"
+        echo "  Certificate Primary IP: $JOBLET_CERT_PRIMARY"
+        if [ -n "$JOBLET_CERT_PUBLIC_IP" ]; then
+            echo "  Certificate Public IP: $JOBLET_CERT_PUBLIC_IP"
+        fi
+        if [ -n "$JOBLET_CERT_DOMAIN" ]; then
+            echo "  Certificate Domain(s): $JOBLET_CERT_DOMAIN"
+        fi
+        echo
+
+        # Generate certificates and embed them in config files
+        if generate_and_embed_certificates; then
+            # Configure storage backends based on environment
+            configure_storage_backends
+
+            # Set secure permissions on config files (they now contain private keys)
+            chmod 600 ${JOBLET_HOME}/config/joblet-config.yml
+            # rnx-config.yml needs to be readable for client usage
+            # Users can copy to ~/.rnx/ for personal use or use directly
+            chmod 644 ${JOBLET_HOME}/config/rnx-config.yml
+
+        else
+            print_error "Failed to generate certificates"
+            exit 1
+        fi
+
+        # Network requirements configured
+        setup_network_requirements
+
+        # Create runtime directories
+        mkdir -p /var/log/joblet
+        mkdir -p ${JOBLET_HOME}/logs
+        mkdir -p ${JOBLET_HOME}/metrics
+        mkdir -p ${JOBLET_HOME}/network
+        mkdir -p ${JOBLET_HOME}/volumes
+        mkdir -p ${JOBLET_HOME}/jobs
+        mkdir -p ${JOBLET_HOME}/run
+        mkdir -p ${JOBLET_HOME}/runtimes
+
+        # Set ownership and permissions
+        chown root:root /var/log/joblet ${JOBLET_HOME}/logs ${JOBLET_HOME}/metrics ${JOBLET_HOME}/network ${JOBLET_HOME}/volumes ${JOBLET_HOME}/jobs ${JOBLET_HOME}/run ${JOBLET_HOME}/runtimes
+        chmod 755 /var/log/joblet ${JOBLET_HOME}/logs ${JOBLET_HOME}/metrics ${JOBLET_HOME}/network ${JOBLET_HOME}/volumes ${JOBLET_HOME}/jobs ${JOBLET_HOME}/run ${JOBLET_HOME}/runtimes
+
+        # Setup cgroup delegation
+        if [ -d /sys/fs/cgroup ]; then
+            print_info "Setting up cgroup delegation..."
+            mkdir -p /sys/fs/cgroup/joblet.slice
+            echo "+cpu +memory +io +pids +cpuset" > /sys/fs/cgroup/joblet.slice/cgroup.subtree_control 2>/dev/null || true
+        fi
+
+        # Note: persist now runs as a subprocess of joblet (no separate service needed)
+        print_info "persist will run as a subprocess of joblet-core"
+
+        # Enable systemd services
+        systemctl daemon-reload
+        systemctl enable joblet.service
+
+        # Clean up temporary files (EC2 info may be used for AWS deployments)
+        rm -f /tmp/joblet-ec2-info
+
+        # Display quickstart information
+        display_quickstart_info "debian"
+
+        ;;
+esac
+
+exit 0

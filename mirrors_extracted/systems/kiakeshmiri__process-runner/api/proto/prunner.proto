@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package prunner;
+
+option go_package = "github.com/kiakeshmiri/process-runner/internal/prunner";
+
+service ProcessService {
+  rpc Start(StartProcessRequest) returns (StartProcessResponse) {}
+  rpc Stop(StopProcessRequest) returns (StopProcessResponse) {}
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {}
+  rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse) {}
+}
+
+message StartProcessRequest {
+  string job = 1;
+  repeated string args = 2;
+}
+
+message StartProcessResponse {
+  Status status = 1;
+  string uuid = 2;
+  string owner = 3;
+}
+
+message StopProcessRequest {
+  string uuid = 1;
+}
+
+message StopProcessResponse {
+  string err_status = 1;
+}
+
+message GetStatusRequest {
+  string uuid = 1;
+}
+
+message GetStatusResponse {
+  Status status = 1;
+  string owner = 2;
+}
+
+message GetLogsRequest {
+  string uuid = 1;
+}
+
+message GetLogsResponse {
+  bytes log = 1;
+}
+
+enum Status {
+  RUNNING = 0;
+  STOPPED = 1;
+  CRASHED = 2;
+  EXITEDWITHERROR = 3;
+  COMPLETED = 4;
+}

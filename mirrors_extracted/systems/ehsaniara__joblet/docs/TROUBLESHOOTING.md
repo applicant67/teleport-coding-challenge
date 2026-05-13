@@ -1,0 +1,940 @@
+# Troubleshooting Guide
+
+Comprehensive troubleshooting guide for common Joblet issues, error messages, and solutions.
+
+## Table of Contents
+
+- [Quick Diagnostics](#quick-diagnostics)
+- [Installation Issues](#installation-issues)
+- [Connection Problems](#connection-problems)
+- [Job Execution Issues](#job-execution-issues)
+- [Resource and Performance](#resource-and-performance)
+- [Volume Problems](#volume-problems)
+- [Network Issues](#network-issues)
+- [Runtime and Isolation Issues](#runtime-and-isolation-issues)
+- [Certificate and Security](#certificate-and-security)
+- [Log Analysis](#log-analysis)
+- [Getting Help](#getting-help)
+
+## Quick Diagnostics
+
+### Health Check Commands
+
+```bash
+# 1. Check server status
+sudo systemctl status joblet
+
+# 2. Test client connectivity
+rnx job list
+
+# 3. Check server logs
+sudo journalctl -u joblet -f
+
+# 4. Verify listening port
+sudo ss -tlnp | grep 50051
+
+# 5. Test simple job
+rnx job run echo "health check"
+
+# 6. Check system resources
+rnx monitor status
+```
+
+### Common Error Patterns
+
+| Error Pattern                      | Likely Cause         | Quick Fix                     |
+|------------------------------------|----------------------|-------------------------------|
+| `connection refused`               | Server not running   | `sudo systemctl start joblet` |
+| `certificate verify failed`        | Certificate mismatch | Regenerate certificates       |
+| `permission denied`                | Role/auth issue      | Check client certificate OU   |
+| `no such file or directory`        | Missing upload       | Verify file exists            |
+| `resource temporarily unavailable` | Resource limit       | Increase limits               |
+
+## Installation Issues
+
+### Binary Not Found
+
+```bash
+# Error: "joblet: command not found"
+
+# Check if binary exists
+ls -la /usr/local/bin/joblet
+
+# If missing, reinstall
+curl -L https://github.com/ehsaniara/joblet/releases/latest/download/joblet-linux-amd64.tar.gz | tar xz
+sudo mv joblet /usr/local/bin/
+sudo chmod +x /usr/local/bin/joblet
+```
+
+### Permission Denied
+
+```bash
+# Error: "permission denied" when starting joblet
+
+# Fix binary permissions
+sudo chmod +x /usr/local/bin/joblet
+
+# Fix directory permissions
+sudo mkdir -p /opt/joblet/{config,state,jobs,volumes}
+sudo chown -R root:root /opt/joblet
+sudo chmod -R 755 /opt/joblet
+```
+
+### Systemd Service Issues
+
+```bash
+# Service fails to start
+
+# Check service file
+sudo systemctl cat joblet
+
+# Fix common service file issues
+sudo tee /etc/systemd/system/joblet.service > /dev/null <<EOF
+[Unit]
+Description=Joblet Job Execution Service
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/joblet
+Restart=always
+Environment="JOBLET_CONFIG_PATH=/opt/joblet/config/joblet-config.yml"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload and restart
+sudo systemctl daemon-reload
+sudo systemctl enable joblet
+sudo systemctl start joblet
+```
+
+### Cgroups Issues
+
+```bash
+# Error: "cgroup not available" or "operation not supported"
+
+# Check cgroups version
+mount | grep cgroup
+
+# For cgroups v2 (required)
+# Check if enabled
+cat /proc/cgroups | grep memory
+
+# Enable cgroups v2 (requires reboot)
+sudo grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=1"
+sudo reboot
+
+# For older systems, enable cgroups v1 compatibility
+echo 'GRUB_CMDLINE_LINUX="cgroup_enable=memory cgroup_memory=1"' | sudo tee -a /etc/default/grub
+sudo update-grub
+sudo reboot
+```
+
+## Connection Problems
+
+### Cannot Connect to Server
+
+```bash
+# Error: "connection refused" or "connection timeout"
+
+# 1. Check if server is running
+sudo systemctl status joblet
+
+# 2. Check if port is listening
+sudo ss -tlnp | grep 50051
+# Should show: LISTEN 0 4096 *:50051 *:*
+
+# 3. Check firewall
+sudo ufw status
+sudo ufw allow 50051/tcp
+
+# 4. Test local connection
+telnet localhost 50051
+
+# 5. Check server logs
+sudo journalctl -u joblet -n 50
+```
+
+### DNS/Hostname Issues
+
+```bash
+# Error: "no such host" or "hostname resolution failed"
+
+# 1. Test hostname resolution
+ping joblet-server
+
+# 2. Use IP address instead
+rnx --config=<(sed 's/joblet-server/192.168.1.100/' ~/.rnx/rnx-config.yml) list
+
+# 3. Add to /etc/hosts
+echo "192.168.1.100 joblet-server" | sudo tee -a /etc/hosts
+
+# 4. Check DNS configuration
+nslookup joblet-server
+```
+
+### Network Connectivity
+
+```bash
+# Test network path to server
+traceroute joblet-server 50051
+
+# Check for proxy issues
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+
+# Test with curl (if server has debug endpoint)
+curl -k https://joblet-server:50051
+
+# Check for MTU issues
+ping -M do -s 1472 joblet-server
+```
+
+## Job Execution Issues
+
+### Job Fails Immediately
+
+```bash
+# Error: Job exits with code 127 (command not found)
+
+# Check command availability
+rnx job run which python3
+rnx job run echo $PATH
+
+# Install required packages
+rnx job run apt update && apt install -y python3
+
+# Use full path
+rnx job run /usr/bin/python3 script.py
+
+# Check uploaded files
+rnx job run ls -la /work
+```
+
+### Command Not Found
+
+```bash
+# Error: "bash: command not found"
+
+# Check available commands
+rnx job run ls -la /usr/bin/
+rnx job run echo $PATH
+
+# Use alternative commands
+rnx job run sh -c "echo test"  # Instead of bash
+rnx job run python3 -c "print('test')"  # Instead of python
+
+# Install packages if allowed
+rnx job run apt update && apt install -y curl
+```
+
+### File Upload Issues
+
+```bash
+# Error: "no such file or directory" for uploaded files
+
+# 1. Verify file exists locally
+ls -la script.py
+
+# 2. Check upload was specified
+rnx job run --upload=script.py ls -la /work
+
+# 3. Use correct filename
+rnx job run --upload=script.py python3 script.py  # Not ./script.py
+
+# 4. Check file permissions
+rnx job run --upload=script.py ls -la script.py
+```
+
+### Environment Issues
+
+```bash
+# Error: "environment variable not set"
+
+# 1. Set environment variable
+rnx job run --env=DATABASE_URL=postgres://localhost/db python app.py
+
+# 2. Check environment
+rnx job run env | grep DATABASE
+
+# 3. Use defaults in script
+rnx job run python -c "import os; print(os.getenv('VAR', 'default'))"
+```
+
+### Working Directory Issues
+
+```bash
+# Error: "no such file or directory" for relative paths
+
+# 1. Check current directory
+rnx job run pwd
+
+# 2. Set working directory
+rnx job run --workdir=/work/app npm start
+
+# 3. Use absolute paths
+rnx job run python3 /work/script.py
+
+# 4. Check uploaded directory structure
+rnx job run --upload=./project find /work -type f
+```
+
+## Resource and Performance
+
+### Out of Memory (OOM)
+
+```bash
+# Error: "Killed" or "Out of memory"
+
+# 1. Check current memory limit
+rnx job status <job-id> | grep "Max Memory"
+
+# 2. Increase memory limit
+rnx job run --max-memory=2048 python memory_intensive.py
+
+# 3. Monitor actual usage
+rnx job run --max-memory=1024 python -c "
+import psutil
+print(f'Memory usage: {psutil.virtual_memory().percent}%')
+"
+
+# 4. Optimize memory usage
+rnx job run python -c "
+import gc
+# Process data in chunks
+# Use generators instead of lists
+gc.collect()
+"
+```
+
+### CPU Throttling
+
+```bash
+# Job running slowly or timing out
+
+# 1. Check CPU limits
+rnx job status <job-id> | grep "Max CPU"
+
+# 2. Increase CPU allocation
+rnx job run --max-cpu=200 compute_intensive.py
+
+# 3. Monitor CPU usage
+rnx monitor
+
+# 4. Use multiple cores efficiently
+rnx job run --cpu-cores="0-3" make -j4
+```
+
+### I/O Bandwidth Limits
+
+```bash
+# Error: "Operation timed out" for file operations
+
+# 1. Check I/O limits
+rnx job status <job-id> | grep "Max IO"
+
+# 2. Increase I/O bandwidth
+rnx job run --max-iobps=52428800 rsync -av /large/dataset/
+
+# 3. Use memory volumes for temporary I/O
+rnx volume create temp-io --size=2GB --type=memory
+rnx job run --volume=temp-io process_data.py
+
+# 4. Optimize I/O patterns
+rnx job run python -c "
+# Read in larger chunks
+# Use buffered I/O
+# Minimize random access
+"
+```
+
+### Resource Exhaustion
+
+```bash
+# Server becomes unresponsive
+
+# 1. Check system resources
+rnx monitor status
+
+# 2. List resource-heavy jobs
+rnx job list --json | jq '.[] | select(.max_memory > 8192)'
+
+# 3. Stop problematic jobs
+rnx job list --json | jq -r '.[] | select(.status == "RUNNING") | .uuid' | head -5 | xargs rnx job stop
+
+# 4. Adjust default limits
+# Edit /opt/joblet/config/joblet-config.yml
+sudo systemctl restart joblet
+```
+
+## Volume Problems
+
+### Volume Creation Fails
+
+```bash
+# Error: "failed to create volume: operation not permitted"
+
+# 1. Check server permissions
+sudo ls -la /opt/joblet/volumes
+
+# 2. Ensure sufficient disk space
+df -h /opt/joblet/volumes
+
+# 3. Check volume limits
+rnx volume list --json | jq 'length'
+
+# 4. Try smaller volume
+rnx volume create test-small --size=100MB
+```
+
+### Volume Not Found
+
+```bash
+# Error: "volume mydata not found"
+
+# 1. List existing volumes
+rnx volume list
+
+# 2. Check volume name spelling
+rnx volume create my-data --size=1GB  # Note: hyphens vs underscores
+
+# 3. Recreate volume if needed
+rnx volume create mydata --size=1GB --type=filesystem
+```
+
+### Volume Mount Issues
+
+```bash
+# Error: "failed to mount volume"
+
+# 1. Check volume exists
+rnx volume list | grep mydata
+
+# 2. Verify mount point
+rnx job run --volume=mydata ls -la /volumes/
+
+# 3. Check volume permissions
+rnx job run --volume=mydata ls -la /volumes/mydata
+
+# 4. Fix permissions if needed
+rnx job run --volume=mydata chmod 755 /volumes/mydata
+```
+
+### Volume Space Issues
+
+```bash
+# Error: "No space left on device"
+
+# 1. Check volume usage
+rnx job run --volume=full-vol df -h /volumes/full-vol
+
+# 2. Clean up files
+rnx job run --volume=full-vol rm -f /volumes/full-vol/*.tmp
+
+# 3. Increase volume size (recreate)
+rnx volume remove full-vol
+rnx volume create full-vol --size=10GB
+
+# 4. Use cleanup script
+rnx job run --volume=data bash -c '
+find /volumes/data -mtime +7 -type f -delete
+'
+```
+
+## Network Issues
+
+### Network Creation Fails
+
+```bash
+# Error: "CIDR overlaps with existing network"
+
+# 1. List existing networks
+rnx network list
+
+# 2. Use different CIDR
+rnx network create mynet --cidr=10.99.0.0/24
+
+# 3. Check system network interfaces
+ip addr show
+```
+
+### No Internet Access
+
+```bash
+# Job cannot reach external sites
+
+# 1. Test from bridge network
+rnx job run --network=bridge ping 8.8.8.8
+
+# 2. Check DNS resolution
+rnx job run --network=bridge nslookup google.com
+
+# 3. Use host network for debugging
+rnx job run --network=host curl https://google.com
+
+# 4. Check custom network config
+# Custom networks may not have NAT enabled
+```
+
+### Inter-Job Communication Fails
+
+```bash
+# Jobs in same network cannot communicate
+
+# 1. Verify same network
+rnx job run --network=mynet ip addr show
+
+# 2. Test connectivity
+rnx job run --network=mynet nc -l 8080 &
+rnx job run --network=mynet nc localhost 8080
+
+# 3. Check firewall/iptables
+rnx job run --network=mynet iptables -L
+
+# 4. Use IP addresses instead of hostnames
+SERVER_IP=$(rnx job run --network=mynet hostname -I | awk '{print $1}')
+rnx job run --network=mynet nc $SERVER_IP 8080
+```
+
+## Certificate and Security
+
+### Certificate Verification Failed
+
+```bash
+# Error: "certificate verify failed" or "x509: certificate signed by unknown authority"
+
+# 1. Check certificate files
+ls -la ~/.rnx/rnx-config.yml
+
+# 2. Regenerate certificates
+sudo /usr/local/bin/certs_gen_embedded.sh
+
+# 3. Copy new client config
+scp server:/opt/joblet/config/rnx-config.yml ~/.rnx/
+
+# 4. Verify certificate chain
+openssl verify -CAfile ca-cert.pem client-cert.pem
+```
+
+### Permission Denied (RBAC)
+
+```bash
+# Error: "permission denied" for admin operations
+
+# 1. Check client role
+openssl x509 -in client-cert.pem -noout -subject
+
+# 2. Should show OU=admin for admin operations
+# Generate admin certificate if needed
+openssl req -new -key client-key.pem -out admin.csr \
+  -subj "/CN=admin-client/OU=admin"
+
+# 3. Use viewer certificate for read-only
+openssl req -new -key client-key.pem -out viewer.csr \
+  -subj "/CN=viewer-client/OU=viewer"
+```
+
+### TLS Handshake Failure
+
+```bash
+# Error: "TLS handshake failed"
+
+# 1. Check TLS version compatibility
+openssl s_client -connect joblet-server:50051 -tls1_3
+
+# 2. Check cipher compatibility
+openssl ciphers -v 'ECDHE+AESGCM:ECDHE+CHACHA20'
+
+# 3. Disable TLS temporarily for debugging (NOT for production)
+# Edit server config to allow lower TLS versions
+```
+
+### Certificate Expiration
+
+```bash
+# Check certificate expiration
+openssl x509 -in server-cert.pem -noout -dates
+
+# Renew certificates before expiration
+sudo /usr/local/bin/certs_gen_embedded.sh
+
+# Update all clients with new certificates
+for client in client1 client2 client3; do
+  scp /opt/joblet/config/rnx-config.yml $client:~/.rnx/
+done
+```
+
+## Log Analysis
+
+### Server Logs
+
+```bash
+# View real-time logs
+sudo journalctl -u joblet -f
+
+# Filter by severity
+sudo journalctl -u joblet -p err
+
+# Search for specific errors
+sudo journalctl -u joblet | grep "certificate"
+sudo journalctl -u joblet | grep "permission denied"
+
+# Export logs for analysis
+sudo journalctl -u joblet --since="1 hour ago" > joblet.log
+```
+
+### Job Logs
+
+```bash
+# Stream job logs (use Ctrl+C to stop)
+rnx job log <job-id>
+
+# Search job logs
+rnx job log <job-id> | grep ERROR
+
+# Save logs for analysis
+rnx job log <job-id> > job-error.log
+```
+
+### Audit Logs
+
+```bash
+# View security audit logs
+sudo tail -f /var/log/joblet/audit.log
+
+# Filter authentication events
+sudo grep "auth" /var/log/joblet/audit.log
+
+# Find failed operations
+sudo jq 'select(.status == "failed")' /var/log/joblet/audit.log
+```
+
+### Debug Logging
+
+```bash
+# Enable debug logging temporarily
+# Edit /opt/joblet/config/joblet-config.yml
+logging:
+  level: "debug"
+
+# Restart server
+sudo systemctl restart joblet
+
+# Check debug logs
+sudo journalctl -u joblet | tail -100
+```
+
+## Runtime and Isolation Issues
+
+### Runtime Build Problems
+
+**Problem: Runtime build fails**
+
+```bash
+# Check build job status
+rnx runtime build ./examples/java-21/runtime.yaml
+# ERROR: Runtime build failed
+
+# Check build job logs
+rnx job status <build-job-uuid>
+rnx job log <build-job-uuid>
+```
+
+**Solutions:**
+
+```bash
+# 1. Check if previous build exists
+ls -la /opt/joblet/runtimes/openjdk-21/
+
+# 2. Remove and rebuild if needed
+rnx runtime remove openjdk-21
+rnx runtime build ./examples/java-21/runtime.yaml
+
+# 3. Check disk space for runtime build
+df -h /opt/joblet/runtimes/
+
+# 4. Verify network access for downloads
+ping archive.ubuntu.com
+```
+
+### Runtime Cleanup Issues
+
+**Problem: Runtime cleanup fails, production jobs have host OS access**
+
+```bash
+# Check if runtime has isolated structure
+ls -la /opt/joblet/runtimes/openjdk-21/
+# Should see version directory with 'isolated/' inside
+
+# Check runtime.yml for isolated paths
+cat /opt/joblet/runtimes/openjdk-21/1.0.0/runtime.yml
+# Mounts should use "isolated/" prefix
+```
+
+**Solutions:**
+
+```bash
+# 1. Remove the runtime
+rnx runtime remove openjdk-21
+
+# 2. Verify runtime.yml uses isolated paths
+grep "source:" /opt/joblet/runtimes/openjdk-21/1.0.0/runtime.yml
+# Should show: source: "isolated/usr/lib/jvm/..."
+
+# 3. Rebuild runtime
+rnx runtime build ./examples/java-21/runtime.yaml
+```
+
+### Service-Based Isolation Problems
+
+**Problem: Jobs not using correct isolation level**
+
+```bash
+# Check job type in environment
+rnx job run env | grep JOB_TYPE
+# Should show: JOB_TYPE=standard (for production jobs)
+
+# Check if runtime build uses isolated environment
+rnx runtime build ./examples/python/runtime.yaml
+# Should automatically use isolated build environment
+```
+
+**Solutions:**
+
+```bash
+# 1. Verify service routing configuration
+cat /opt/joblet/config/joblet-config.yml | grep -A 10 isolation
+
+# 2. Check job logs for isolation setup
+rnx job log <job-uuid> | grep -i "isolation\|chroot"
+
+# 3. Restart server if configuration changed
+sudo systemctl restart joblet
+```
+
+### OpenJDK Runtime Issues
+
+**Problem: Java runtime fails with "no such file or directory"**
+
+```bash
+rnx job run --runtime=openjdk:21 java -version
+# Error: exec failed: no such file or directory
+```
+
+**Root Causes and Solutions:**
+
+1. **Missing dynamic linker**: Java binaries need `/lib64/ld-linux-x86-64.so.2`
+2. **Missing shared libraries**: JVM requires `libjli.so`, `libstdc++.so.6`
+3. **Incorrect library paths**: Runtime must be configured for isolated environment
+
+```bash
+# Check if runtime includes all necessary components
+rnx runtime info openjdk:21
+# Should show ~292MB with 192 files
+
+# Verify Java works in runtime
+rnx job run --runtime=openjdk:21 java -version
+# Should output: openjdk version "21.0.8"
+
+# Test compilation works
+echo 'public class Test { public static void main(String[] args) { System.out.println("Hello!"); }}' > Test.java
+rnx job run --runtime=openjdk:21 --upload=Test.java javac Test.java
+rnx job run --runtime=openjdk:21 java Test
+```
+
+**Problem: Java compilation fails with security configuration errors**
+
+```bash
+rnx job run --runtime=openjdk:21 --upload=Test.java javac Test.java
+# Exception: Error loading java.security file
+```
+
+**Solution:** Runtime setup includes complete Java configuration:
+
+```bash
+# Runtime should include conf/security directory
+# This is automatically handled by the system-based setup approach
+```
+
+**Problem: Runtime shows very small size (1-2KB)**
+
+```bash
+rnx runtime list
+# openjdk:21    21    1.1KB    # This indicates setup failure
+```
+
+**Solution:** Use system-based setup approach:
+
+```bash
+# Remove failed runtime and rebuild
+rnx runtime remove openjdk-21
+rnx runtime build ./examples/java-21/runtime.yaml
+
+# Verify proper size
+rnx runtime list
+# Should show: openjdk:21    21    292.0MB    OpenJDK runtime with system packages
+```
+
+### Runtime Security Validation
+
+**Problem: Want to verify runtime isolation**
+
+```bash
+# Test that production job cannot access host filesystem
+rnx job run --runtime=openjdk:21 find /usr -name "*.so" | wc -l
+# Should show limited results (only isolated runtime files)
+
+# Test that runtime job cannot access joblet internals
+rnx job run --runtime=openjdk:21 ls /opt/joblet/
+# Should fail or show very limited access
+
+# Verify runtime files are copies, not host mounts
+rnx job run --runtime=openjdk:21 ls -la /usr/lib/jvm/
+# Should show Java installation but isolated from host
+```
+
+### Runtime Performance Issues
+
+**Problem: Runtime installation takes too long**
+
+```bash
+# Check runtime installation progress
+rnx job status <installation-job-uuid> --follow
+
+# Monitor resource usage during build
+rnx monitor
+
+# Check if cleanup phase is hanging
+tail -f /var/log/joblet/server.log | grep -i cleanup
+```
+
+**Solutions:**
+
+```bash
+# 1. Increase build timeout in configuration
+# Edit /opt/joblet/config/joblet-config.yml
+runtime:
+  builder:
+    timeout: "7200s"  # 2 hours instead of 1
+
+# 2. Monitor cleanup phase specifically
+rnx job log <build-job-uuid> | grep -A 20 -B 5 "cleanup phase"
+
+# 3. Check disk I/O during copy operations
+iostat -x 1 5
+```
+
+## Getting Help
+
+### Information to Collect
+
+When reporting issues, include:
+
+```bash
+# 1. Version information
+joblet --version
+rnx --version
+
+# 2. System information
+uname -a
+lsb_release -a
+
+# 3. Configuration (sanitized - remove certificates)
+cat /opt/joblet/config/joblet-config.yml | grep -v "BEGIN CERTIFICATE"
+
+# 4. Recent logs
+sudo journalctl -u joblet --since="1 hour ago"
+
+# 5. Resource usage
+rnx monitor status
+
+# 6. Network configuration
+ip addr show
+iptables -L
+
+# 7. Job details (if job-related)
+rnx job status <job-id>
+rnx job log <job-id>
+```
+
+### Debugging Steps
+
+1. **Reproduce the issue** with minimal example
+2. **Check logs** at all levels (system, server, job)
+3. **Test connectivity** between components
+4. **Verify configuration** syntax and values
+5. **Test with known-good configuration**
+6. **Isolate variables** (network, certificates, resources)
+
+### Support Channels
+
+- **GitHub Issues**: https://github.com/ehsaniara/joblet/issues
+- **Documentation**: Check all relevant docs first
+- **Community Forum**: For general questions
+- **Security Issues**: Report privately to maintainers
+
+### Creating Bug Reports
+
+```markdown
+## Issue Description
+
+Brief description of the problem
+
+## Expected Behavior
+
+What should happen
+
+## Actual Behavior
+
+What actually happens
+
+## Steps to Reproduce
+
+1. Run `rnx job run echo test`
+2. Observe error
+3. Check logs
+
+## Environment
+
+- Joblet version: 1.x.x
+- OS: Ubuntu 22.04
+- Architecture: x86_64
+
+## Logs
+```
+
+sudo journalctl -u joblet --since="1 hour ago"
+
+```
+
+## Configuration
+```yaml
+# Sanitized config (remove certificates)
+```
+
+## Additional Context
+
+Any other relevant information
+
+```
+
+## Common Solutions Summary
+
+| Problem | Solution |
+|---------|----------|
+| Server won't start | Check permissions, cgroups, config syntax |
+| Connection refused | Start server, check firewall, verify port |
+| Certificate errors | Regenerate certificates, check time sync |
+| Permission denied | Check RBAC role, verify certificate OU |
+| Job fails immediately | Check command exists, verify uploads |
+| Out of memory | Increase memory limit or optimize usage |
+| Volume issues | Check disk space, permissions, naming |
+| Network problems | Verify CIDR ranges, check isolation |
+| Runtime install fails | Check network, disk space, force rebuild |
+| Runtime cleanup fails | Verify isolated/ directory, rebuild runtime |
+| Wrong isolation level | Check job type environment, restart server |
+| Host OS access in runtime | Verify runtime.yml uses isolated paths |
+| Performance issues | Adjust resource limits, monitor usage |

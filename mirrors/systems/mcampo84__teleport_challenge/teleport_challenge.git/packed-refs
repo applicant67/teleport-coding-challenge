@@ -1,0 +1,10 @@
+# pack-refs with: peeled fully-peeled sorted 
+a7151674c77d1cf8e310a1d1773712176c171946 refs/heads/main
+a6f42d343377664d27911571faee4da5a803d5be refs/heads/tc3/job-manager
+23353dfaa8d92d9b5eb2408d26b48cc2466b1931 refs/heads/tc4/dockerfile
+7281874367096cca7431456cb4fefa19ad37d874 refs/heads/tc6/protobuf
+77f76e5095d655da40782d4a3b5257b2638451fe refs/pull/1/head
+a6f42d343377664d27911571faee4da5a803d5be refs/pull/5/head
+1a7245ebb102079cc8b6f904e842972d1bb6892a refs/pull/5/merge
+7281874367096cca7431456cb4fefa19ad37d874 refs/pull/7/head
+725704c33cd859a125bdb005fad860f3294c8580 refs/pull/7/merge

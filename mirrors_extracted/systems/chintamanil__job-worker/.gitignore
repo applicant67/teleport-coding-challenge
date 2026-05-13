@@ -1,0 +1,27 @@
+# Build output
+/build/
+/worker-cli
+/worker-server
+/client
+worker-server-test
+
+# Go
+*.test
+*.out
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.backup/

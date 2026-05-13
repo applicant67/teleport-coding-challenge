@@ -1,0 +1,49 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`it renders consistently 1`] = `
+<Login>
+  <form
+    className="login-form"
+    onSubmit={[Function]}
+  >
+    <h1>
+      Sign Into Your Account
+    </h1>
+    <div>
+      <label
+        htmlFor="email"
+      >
+        Email Address
+      </label>
+      <input
+        autoComplete="username"
+        className="field"
+        id="email"
+        name="email"
+        required={true}
+        type="email"
+      />
+    </div>
+    <div>
+      <label
+        htmlFor="password"
+      >
+        Password
+      </label>
+      <input
+        autoComplete="current-password"
+        className="field"
+        id="password"
+        name="password"
+        required={true}
+        type="password"
+      />
+    </div>
+    <input
+      className="button block"
+      type="submit"
+      value="Login to my Dashboard"
+    />
+  </form>
+</Login>
+`;

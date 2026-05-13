@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+option go_package = "github.com/gstelang/job-worker-service/service/proto";
+
+package jobworker.v1;
+
+service JobWorker {
+    rpc StartJob (StartJobRequest) returns (StartJobResponse);
+    rpc StopJob (StopJobRequest) returns (StopJobResponse);
+    rpc QueryJob (QueryJobRequest) returns (QueryJobResponse);
+    rpc StreamLogs (StreamLogsRequest) returns (stream StreamLogsResponse);
+}
+
+// {
+//     "command_args": [
+//         "-ltra"
+//     ],
+//     "command_name": "ls"
+// }
+message StartJobRequest {
+    string command_name = 1;
+    repeated string command_args = 2;
+}
+
+// {
+//     "job_id": "761db04c-0150-4f0b-a6fd-5cab9b9a48bf",
+// }
+message StartJobResponse {
+    string job_id = 1;
+    string message = 2;
+}
+
+message StopJobRequest {
+    string job_id = 1;
+}
+
+// {
+//     "success": "true",
+// }
+message StopJobResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message QueryJobRequest {
+    string job_id = 1;
+}
+
+message QueryJobResponse {
+    string status = 1;    // Indicates if the job is running or killed|exited
+    int32 pid = 2;        // Process ID of the job
+    int32 exit_code = 3;  // Exit code if the job has exited
+    int32 signal = 4;     // Signal used to terminate the job, if applicable
+    string message = 5;
+}
+
+message StreamLogsRequest {
+    string job_id = 1;
+}
+
+// sample streaming response
+// {
+//     "message": "2024-08-26T11:35:21Z [INFO] Server started on port 8080",
+// }
+message StreamLogsResponse {
+    bytes message = 1;
+}

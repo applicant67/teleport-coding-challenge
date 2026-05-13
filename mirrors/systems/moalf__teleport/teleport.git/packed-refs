@@ -1,0 +1,9 @@
+# pack-refs with: peeled fully-peeled sorted 
+1c9b9283cc549d9144a8187a4620d911fd977167 refs/heads/docs/design
+41465183b8eaa2e82a19faf10bcf5ba3aeb02724 refs/heads/feat/app-registration
+914a20fc31abac0e55a00d7031a237c306d97302 refs/heads/feat/auth0-tenant-config
+8d02b72f9b148d23e32663f3db8e2609d6c1015a refs/heads/main
+1c9b9283cc549d9144a8187a4620d911fd977167 refs/pull/1/head
+914a20fc31abac0e55a00d7031a237c306d97302 refs/pull/2/head
+41465183b8eaa2e82a19faf10bcf5ba3aeb02724 refs/pull/3/head
+328bd7a9a11712298227cd2bae7d7cd8ba24a91d refs/pull/3/merge

@@ -1,0 +1,226 @@
+//go:build linux
+
+package core
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+
+	"github.com/ehsaniara/joblet/internal/joblet/core/filesystem"
+	"github.com/ehsaniara/joblet/internal/joblet/core/resource"
+	"github.com/ehsaniara/joblet/internal/joblet/core/upload"
+	"github.com/ehsaniara/joblet/internal/joblet/domain"
+	"github.com/ehsaniara/joblet/pkg/config"
+	"github.com/ehsaniara/joblet/pkg/logger"
+	"github.com/ehsaniara/joblet/pkg/platform"
+)
+
+// ResourceManager handles all resource-related operations for jobs.
+// Coordinates cgroup creation, filesystem isolation, workspace setup,
+// and upload management for both immediate and scheduled jobs.
+type ResourceManager struct {
+	cgroup     resource.Resource
+	filesystem *filesystem.Isolator
+	platform   platform.Platform
+	config     *config.Config
+	logger     *logger.Logger
+	uploadMgr  *upload.Manager
+}
+
+// NewResourceManager creates a new resource manager.
+// Initializes manager with cgroup resource, filesystem isolator,
+// platform interface, and upload manager for complete resource handling.
+func NewResourceManager(
+	cgroup resource.Resource,
+	filesystem *filesystem.Isolator,
+	platform platform.Platform,
+	config *config.Config,
+	uploadMgr *upload.Manager,
+	logger *logger.Logger,
+) *ResourceManager {
+	return &ResourceManager{
+		cgroup:     cgroup,
+		filesystem: filesystem,
+		platform:   platform,
+		config:     config,
+		logger:     logger.WithField("component", "resource-manager"),
+		uploadMgr:  uploadMgr,
+	}
+}
+
+// SetupJobResources sets up all resources for a job (cgroup, filesystem).
+// Creates workspace directory, establishes cgroup with resource limits,
+// and applies CPU core restrictions if specified. Cleans up on failure.
+func (rm *ResourceManager) SetupJobResources(job *domain.Job) error {
+	log := rm.logger.WithField("job_uuid", job.Uuid)
+	log.Debug("setting up job resources")
+
+	// Create workspace directory
+	if err := rm.createWorkspace(job.Uuid); err != nil {
+		return err
+	}
+
+	// Create cgroup with resource limits
+	if err := rm.createCgroup(job); err != nil {
+		rm.cleanupWorkspace(job.Uuid)
+		return err
+	}
+
+	// Apply CPU core restrictions if specified
+	if !job.Limits.CPUCores.IsEmpty() {
+		if err := rm.applyCPUCoreRestrictions(job); err != nil {
+			rm.cleanupAll(job.Uuid)
+			return fmt.Errorf("CPU core setup failed: %w", err)
+		}
+	}
+
+	// Setup GPU device permissions if GPUs are allocated
+	if job.IsGPUAllocated() {
+		if err := rm.setupGPUDevicePermissions(job); err != nil {
+			rm.cleanupAll(job.Uuid)
+			return fmt.Errorf("GPU device setup failed: %w", err)
+		}
+	}
+
+	log.Info("job resources setup completed", "hasGPU", job.IsGPUAllocated())
+	return nil
+}
+
+// PrepareScheduledJobUploads prepares uploads for a scheduled job.
+// Pre-processes file uploads for scheduled jobs to ensure they're ready
+// when the scheduled execution time arrives.
+func (rm *ResourceManager) PrepareScheduledJobUploads(ctx context.Context, job *domain.Job, uploads []domain.FileUpload) error {
+	if len(uploads) == 0 {
+		return nil
+	}
+
+	log := rm.logger.WithField("job_uuid", job.Uuid)
+	log.Debug("preparing uploads for scheduled job", "count", len(uploads))
+
+	// Create workspace
+	workspaceDir := rm.getWorkspaceDir(job.Uuid)
+	if err := rm.platform.MkdirAll(workspaceDir, 0755); err != nil {
+		return fmt.Errorf("failed to create workspace: %w", err)
+	}
+
+	// Setup cgroup early for resource limits during upload
+	if err := rm.createCgroup(job); err != nil {
+		_ = rm.platform.RemoveAll(filepath.Dir(workspaceDir))
+		return fmt.Errorf("failed to create cgroup: %w", err)
+	}
+
+	// Process uploads
+	streamConfig := &upload.StreamConfig{
+		JobUUID:      job.Uuid,
+		Uploads:      uploads,
+		MemoryLimit:  job.Limits.Memory.Megabytes(),
+		WorkspaceDir: workspaceDir,
+	}
+
+	if err := rm.uploadMgr.ProcessDirectUploads(ctx, streamConfig); err != nil {
+		return fmt.Errorf("upload processing failed: %w", err)
+	}
+
+	log.Info("scheduled job uploads prepared")
+	return nil
+}
+
+// Private helper methods
+
+// createWorkspace creates a dedicated workspace directory for the job.
+// The workspace is created under the base filesystem directory with the job ID
+// as the subdirectory name, with permissions set to 0755 for proper isolation.
+func (rm *ResourceManager) createWorkspace(jobID string) error {
+	baseDir := filepath.Join(rm.config.Filesystem.BaseDir, jobID)
+	if err := rm.platform.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create workspace: %w", err)
+	}
+	return nil
+}
+
+// createCgroup creates and configures a cgroup for the job with specified resource limits.
+// It applies CPU, memory, and IO bandwidth constraints as defined in the job's resource limits.
+// The cgroup path is derived from the job configuration and created in the system cgroup hierarchy.
+func (rm *ResourceManager) createCgroup(job *domain.Job) error {
+	if err := rm.cgroup.Create(
+		job.CgroupPath,
+		job.Limits.CPU.Value(),
+		job.Limits.Memory.Megabytes(),
+		int32(job.Limits.IOBandwidth.BytesPerSecond()),
+	); err != nil {
+		return fmt.Errorf("cgroup creation failed: %w", err)
+	}
+	return nil
+}
+
+// applyCPUCoreRestrictions applies CPU core affinity restrictions to the job's cgroup.
+// It configures CPU core limitations on both the main cgroup and process subgroup,
+// ensuring that the job runs only on the specified CPU cores for performance isolation.
+func (rm *ResourceManager) applyCPUCoreRestrictions(job *domain.Job) error {
+	log := rm.logger.WithFields("job_uuid", job.Uuid, "cores", job.Limits.CPUCores)
+	log.Debug("applying CPU core restrictions")
+
+	// Apply CPU core restrictions to both the main cgroup and process subgroup
+	if err := rm.cgroup.SetCPUCores(job.CgroupPath, job.Limits.CPUCores.String()); err != nil {
+		return fmt.Errorf("failed to set CPU cores on main cgroup: %w", err)
+	}
+
+	// Also apply to the process subgroup where the actual process will be placed
+	processSubgroupPath := filepath.Join(job.CgroupPath, "proc")
+	if err := rm.cgroup.SetCPUCores(processSubgroupPath, job.Limits.CPUCores.String()); err != nil {
+		log.Warn("failed to set CPU cores on process subgroup", "error", err)
+		// Don't fail - the main cgroup restriction should still work
+	}
+
+	log.Info("CPU core restrictions applied")
+	return nil
+}
+
+func (rm *ResourceManager) getWorkspaceDir(jobID string) string {
+	return filepath.Join(rm.config.Filesystem.BaseDir, jobID, "work")
+}
+
+func (rm *ResourceManager) cleanupWorkspace(jobID string) {
+	baseDir := filepath.Join(rm.config.Filesystem.BaseDir, jobID)
+	if err := rm.platform.RemoveAll(baseDir); err != nil {
+		rm.logger.Error("failed to cleanup workspace",
+			"job_uuid", jobID, "error", err)
+	}
+}
+
+func (rm *ResourceManager) cleanupAll(jobID string) {
+	rm.cgroup.CleanupCgroup(jobID)
+	rm.cleanupWorkspace(jobID)
+}
+
+// setupGPUDevicePermissions configures cgroup device permissions for GPU access
+func (rm *ResourceManager) setupGPUDevicePermissions(job *domain.Job) error {
+	log := rm.logger.WithFields("job_uuid", job.Uuid, "gpuIndices", job.GPUIndices)
+	log.Debug("setting up GPU device permissions")
+
+	if !job.IsGPUAllocated() {
+		return nil // No setup needed if no GPUs allocated
+	}
+
+	// Convert int32 GPU indices to int slice for the cgroup interface
+	gpuIndices := make([]int, len(job.GPUIndices))
+	for i, gpuIndex := range job.GPUIndices {
+		gpuIndices[i] = int(gpuIndex)
+	}
+
+	// Set up device permissions via cgroup devices controller
+	if err := rm.cgroup.SetGPUDevices(job.CgroupPath, gpuIndices); err != nil {
+		return fmt.Errorf("failed to set GPU device permissions: %w", err)
+	}
+
+	log.Info("GPU device permissions configured successfully", "allowedGPUs", gpuIndices)
+	return nil
+}
+
+// AddProcessToCgroup adds a running process to its job's cgroup.
+// This must be called after the process starts to ensure resource limits
+// and eBPF telematics monitoring work correctly.
+func (rm *ResourceManager) AddProcessToCgroup(cgroupPath string, pid int) error {
+	return rm.cgroup.AddProcessToCgroup(cgroupPath, pid)
+}

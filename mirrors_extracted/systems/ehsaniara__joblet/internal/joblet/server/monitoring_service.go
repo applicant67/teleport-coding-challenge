@@ -1,0 +1,429 @@
+package server
+
+import (
+	"context"
+	"net"
+	"strings"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	pb "github.com/ehsaniara/joblet-proto/v2/gen"
+	"github.com/ehsaniara/joblet/internal/joblet/monitoring"
+	"github.com/ehsaniara/joblet/internal/joblet/monitoring/domain"
+	"github.com/ehsaniara/joblet/pkg/config"
+	"github.com/ehsaniara/joblet/pkg/logger"
+	"github.com/ehsaniara/joblet/pkg/version"
+)
+
+// MonitoringServiceServer implements the gRPC monitoring service
+type MonitoringServiceServer struct {
+	pb.UnimplementedMonitoringServiceServer
+	monitor *monitoring.Service
+	config  *config.Config
+	logger  *logger.Logger
+}
+
+// NewMonitoringServiceServer creates a new monitoring service server
+func NewMonitoringServiceServer(monitor *monitoring.Service, cfg *config.Config) *MonitoringServiceServer {
+	return &MonitoringServiceServer{
+		monitor: monitor,
+		config:  cfg,
+		logger:  logger.WithField("component", "monitoring-grpc"),
+	}
+}
+
+// GetSystemStatus returns the current system status
+func (s *MonitoringServiceServer) GetSystemStatus(ctx context.Context, req *pb.EmptyRequest) (*pb.SystemStatusResponse, error) {
+
+	systemStatus := s.monitor.GetSystemStatus()
+	if systemStatus == nil {
+		return nil, status.Errorf(codes.Internal, "failed to get system status")
+	}
+
+	return s.systemStatusToProto(systemStatus), nil
+}
+
+// StreamSystemMetrics streams system metrics at the specified interval
+func (s *MonitoringServiceServer) StreamSystemMetrics(req *pb.StreamMetricsRequest, stream pb.MonitoringService_StreamSystemMetricsServer) error {
+	s.logger.Debug("StreamSystemMetrics called", "interval", req.IntervalSeconds, "filters", req.MetricTypes)
+
+	// Default to 5 seconds if not specified
+	interval := time.Duration(req.IntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+
+	// Minimum interval of 1 second
+	if interval < time.Second {
+		interval = time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Send initial metrics immediately
+	if err := s.sendMetrics(stream, req.MetricTypes); err != nil {
+		return err
+	}
+
+	// Stream updates
+	for {
+		select {
+		case <-stream.Context().Done():
+			s.logger.Debug("stream cancelled by client")
+			return nil
+		case <-ticker.C:
+			if err := s.sendMetrics(stream, req.MetricTypes); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// Helper methods
+
+func (s *MonitoringServiceServer) sendMetrics(stream pb.MonitoringService_StreamSystemMetricsServer, filters []string) error {
+	metrics := s.monitor.GetLatestMetrics()
+	if metrics == nil {
+		// No metrics available yet, skip this iteration
+		return nil
+	}
+
+	filtered := s.filterMetrics(metrics, filters)
+	proto := s.systemMetricsToProto(filtered)
+
+	if err := stream.Send(proto); err != nil {
+		s.logger.Error("failed to send metrics", "error", err)
+		return status.Errorf(codes.Internal, "failed to send metrics: %v", err)
+	}
+
+	return nil
+}
+
+func (s *MonitoringServiceServer) filterMetrics(metrics *domain.SystemMetrics, types []string) *domain.SystemMetrics {
+	if len(types) == 0 {
+		return metrics // No filtering
+	}
+
+	// Create a filtered copy
+	filtered := &domain.SystemMetrics{
+		Timestamp: metrics.Timestamp,
+		Host:      metrics.Host,
+		Cloud:     metrics.Cloud,
+	}
+
+	// Apply filters
+	for _, t := range types {
+		switch t {
+		case "cpu":
+			filtered.CPU = metrics.CPU
+		case "memory":
+			filtered.Memory = metrics.Memory
+		case "disk":
+			filtered.Disk = metrics.Disk
+		case "network":
+			filtered.Network = metrics.Network
+		case "io":
+			filtered.IO = metrics.IO
+		case "process":
+			filtered.Processes = metrics.Processes
+		}
+	}
+
+	return filtered
+}
+
+// Conversion methods from domain to protobuf
+
+func (s *MonitoringServiceServer) systemStatusToProto(status *monitoring.SystemStatus) *pb.SystemStatusResponse {
+	return &pb.SystemStatusResponse{
+		Timestamp:     status.Timestamp.Format(time.RFC3339),
+		Available:     status.Available,
+		Host:          s.hostInfoToProto(status.Host),
+		Cpu:           s.cpuMetricsToProto(status.CPU),
+		Memory:        s.memoryMetricsToProto(status.Memory),
+		Disks:         s.diskMetricsToProto(status.Disk),
+		Networks:      s.networkMetricsToProto(status.Network),
+		Io:            s.ioMetricsToProto(status.IO),
+		Processes:     s.processMetricsToProto(status.Processes),
+		Cloud:         s.cloudInfoToProto(status.Cloud),
+		ServerVersion: s.serverVersionToProto(),
+	}
+}
+
+func (s *MonitoringServiceServer) systemMetricsToProto(metrics *domain.SystemMetrics) *pb.SystemMetricsResponse {
+	return &pb.SystemMetricsResponse{
+		Timestamp: metrics.Timestamp.Format(time.RFC3339),
+		Host:      s.hostInfoToProto(metrics.Host),
+		Cpu:       s.cpuMetricsToProto(metrics.CPU),
+		Memory:    s.memoryMetricsToProto(metrics.Memory),
+		Disks:     s.diskMetricsToProto(metrics.Disk),
+		Networks:  s.networkMetricsToProto(metrics.Network),
+		Io:        s.ioMetricsToProto(metrics.IO),
+		Processes: s.processMetricsToProto(metrics.Processes),
+		Cloud:     s.cloudInfoToProto(metrics.Cloud),
+	}
+}
+
+func (s *MonitoringServiceServer) hostInfoToProto(h domain.HostInfo) *pb.HostInfo {
+	// Collect server IP addresses
+	serverIPs := s.collectServerIPs()
+
+	// Collect MAC addresses
+	macAddresses := s.collectMACAddresses()
+
+	return &pb.HostInfo{
+		Hostname:      h.Hostname,
+		Os:            h.OS,
+		KernelVersion: h.Kernel,
+		Architecture:  h.Architecture,
+		BootTime:      h.BootTime.Format(time.RFC3339),
+		Uptime:        int64(h.Uptime.Seconds()),
+		NodeId:        s.config.Server.NodeId,
+		ServerIps:     serverIPs,
+		MacAddresses:  macAddresses,
+	}
+}
+
+func (s *MonitoringServiceServer) cpuMetricsToProto(c domain.CPUMetrics) *pb.CPUMetrics {
+	loadAvg := make([]float64, len(c.LoadAverage))
+	copy(loadAvg, c.LoadAverage[:])
+
+	return &pb.CPUMetrics{
+		Cores:        int32(c.Cores),
+		UsagePercent: c.UsagePercent,
+		UserTime:     c.UserTime,
+		SystemTime:   c.SystemTime,
+		IdleTime:     c.IdleTime,
+		IoWaitTime:   c.IOWaitTime,
+		StealTime:    c.StealTime,
+		LoadAverage:  loadAvg,
+		PerCoreUsage: c.PerCoreUsage,
+	}
+}
+
+func (s *MonitoringServiceServer) memoryMetricsToProto(m domain.MemoryMetrics) *pb.MemoryMetrics {
+	return &pb.MemoryMetrics{
+		TotalBytes:     int64(m.TotalBytes),
+		UsedBytes:      int64(m.UsedBytes),
+		FreeBytes:      int64(m.FreeBytes),
+		AvailableBytes: int64(m.AvailableBytes),
+		UsagePercent:   m.UsagePercent,
+		CachedBytes:    int64(m.CachedBytes),
+		BufferedBytes:  int64(m.BufferedBytes),
+		SwapTotal:      int64(m.SwapTotal),
+		SwapUsed:       int64(m.SwapUsed),
+		SwapFree:       int64(m.SwapFree),
+	}
+}
+
+func (s *MonitoringServiceServer) diskMetricsToProto(disks []domain.DiskMetrics) []*pb.DiskMetrics {
+	result := make([]*pb.DiskMetrics, len(disks))
+	for i, d := range disks {
+		// Calculate inodes usage percentage
+		var inodesUsagePercent float64
+		if d.InodesTotal > 0 {
+			inodesUsagePercent = float64(d.InodesUsed) / float64(d.InodesTotal) * 100.0
+		}
+
+		result[i] = &pb.DiskMetrics{
+			Device:             d.Device,
+			MountPoint:         d.MountPoint,
+			Filesystem:         d.FileSystem,
+			TotalBytes:         int64(d.TotalBytes),
+			UsedBytes:          int64(d.UsedBytes),
+			FreeBytes:          int64(d.FreeBytes),
+			UsagePercent:       d.UsagePercent,
+			InodesTotal:        int64(d.InodesTotal),
+			InodesUsed:         int64(d.InodesUsed),
+			InodesFree:         int64(d.InodesFree),
+			InodesUsagePercent: inodesUsagePercent,
+		}
+	}
+	return result
+}
+
+func (s *MonitoringServiceServer) networkMetricsToProto(networks []domain.NetworkMetrics) []*pb.NetworkMetrics {
+	result := make([]*pb.NetworkMetrics, len(networks))
+	for i, n := range networks {
+		result[i] = &pb.NetworkMetrics{
+			Interface:       n.Interface,
+			BytesReceived:   int64(n.BytesReceived),
+			BytesSent:       int64(n.BytesSent),
+			PacketsReceived: int64(n.PacketsReceived),
+			PacketsSent:     int64(n.PacketsSent),
+			ErrorsIn:        int64(n.ErrorsReceived),
+			ErrorsOut:       int64(n.ErrorsSent),
+			DropsIn:         int64(n.DropsReceived),
+			DropsOut:        int64(n.DropsSent),
+			ReceiveRate:     n.RxThroughputBPS,
+			TransmitRate:    n.TxThroughputBPS,
+			IpAddresses:     n.IPAddresses,
+			MacAddress:      n.MACAddress,
+		}
+	}
+	return result
+}
+
+func (s *MonitoringServiceServer) ioMetricsToProto(io domain.IOMetrics) *pb.IOMetrics {
+	// Convert per-device metrics to protobuf
+	var diskIO []*pb.DiskIOMetrics
+	if len(io.PerDevice) > 0 {
+		diskIO = make([]*pb.DiskIOMetrics, len(io.PerDevice))
+		for i, dev := range io.PerDevice {
+			diskIO[i] = &pb.DiskIOMetrics{
+				Device:          dev.Device,
+				ReadsCompleted:  int64(dev.ReadsCompleted),
+				WritesCompleted: int64(dev.WritesCompleted),
+				ReadBytes:       int64(dev.ReadBytes),
+				WriteBytes:      int64(dev.WriteBytes),
+				ReadTime:        int64(dev.ReadTime),
+				WriteTime:       int64(dev.WriteTime),
+				IoTime:          int64(dev.IOTime),
+				Utilization:     dev.Utilization,
+			}
+		}
+	}
+
+	return &pb.IOMetrics{
+		TotalReads:  int64(io.ReadsCompleted),
+		TotalWrites: int64(io.WritesCompleted),
+		ReadBytes:   int64(io.ReadBytes),
+		WriteBytes:  int64(io.WriteBytes),
+		ReadRate:    io.ReadRate,
+		WriteRate:   io.WriteRate,
+		DiskIo:      diskIO,
+	}
+}
+
+func (s *MonitoringServiceServer) processMetricsToProto(p domain.ProcessMetrics) *pb.ProcessMetrics {
+	topCPU := make([]*pb.ProcessInfo, len(p.TopByCPU))
+	for i, proc := range p.TopByCPU {
+		topCPU[i] = s.processInfoToProto(proc)
+	}
+
+	topMem := make([]*pb.ProcessInfo, len(p.TopByMemory))
+	for i, proc := range p.TopByMemory {
+		topMem[i] = s.processInfoToProto(proc)
+	}
+
+	return &pb.ProcessMetrics{
+		TotalProcesses:    int32(p.TotalProcesses),
+		RunningProcesses:  int32(p.RunningProcesses),
+		SleepingProcesses: int32(p.SleepingProcesses),
+		StoppedProcesses:  int32(p.StoppedProcesses),
+		ZombieProcesses:   int32(p.ZombieProcesses),
+		TotalThreads:      int32(p.TotalThreads),
+		TopByCpu:          topCPU,
+		TopByMemory:       topMem,
+	}
+}
+
+func (s *MonitoringServiceServer) processInfoToProto(p domain.ProcessInfo) *pb.ProcessInfo {
+	return &pb.ProcessInfo{
+		Pid:           int32(p.PID),
+		Ppid:          int32(p.PPID),
+		Name:          p.Name,
+		Command:       p.Command,
+		CpuPercent:    p.CPUPercent,
+		MemoryPercent: p.MemoryPercent,
+		MemoryBytes:   int64(p.MemoryBytes),
+		Status:        p.Status,
+		StartTime:     p.StartTime.Format(time.RFC3339),
+	}
+}
+
+func (s *MonitoringServiceServer) cloudInfoToProto(c *domain.CloudInfo) *pb.CloudInfo {
+	if c == nil {
+		return nil
+	}
+
+	return &pb.CloudInfo{
+		Provider:       c.Provider,
+		Region:         c.Region,
+		Zone:           c.Zone,
+		InstanceId:     c.InstanceID,
+		InstanceType:   c.InstanceType,
+		HypervisorType: c.HypervisorType,
+		Metadata:       c.Metadata,
+	}
+}
+
+func (s *MonitoringServiceServer) serverVersionToProto() *pb.ServerVersionInfo {
+	buildInfo := version.GetBuildInfo()
+
+	return &pb.ServerVersionInfo{
+		Version:     version.GetVersion(),
+		GitCommit:   buildInfo.GitCommit,
+		GitTag:      buildInfo.GitTag,
+		BuildDate:   buildInfo.BuildDate,
+		Component:   buildInfo.Component,
+		GoVersion:   buildInfo.GoVersion,
+		Platform:    buildInfo.Platform + "/" + buildInfo.Architecture,
+		ProtoCommit: buildInfo.ProtoCommit,
+		ProtoTag:    buildInfo.ProtoTag,
+	}
+}
+
+// collectServerIPs collects all non-loopback IP addresses from network interfaces
+func (s *MonitoringServiceServer) collectServerIPs() []string {
+	var ips []string
+
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		s.logger.Debug("failed to get network interfaces", "error", err)
+		return ips
+	}
+
+	for _, iface := range interfaces {
+		// Skip loopback and down interfaces
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				ip := ipNet.IP
+				// Skip loopback IPs and only include IPv4 for now
+				if !ip.IsLoopback() && ip.To4() != nil {
+					ips = append(ips, ip.String())
+				}
+			}
+		}
+	}
+
+	return ips
+}
+
+// collectMACAddresses collects MAC addresses from network interfaces
+func (s *MonitoringServiceServer) collectMACAddresses() []string {
+	var macs []string
+
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		s.logger.Debug("failed to get network interfaces", "error", err)
+		return macs
+	}
+
+	for _, iface := range interfaces {
+		// Skip loopback interfaces and interfaces without MAC addresses
+		if iface.Flags&net.FlagLoopback != 0 || len(iface.HardwareAddr) == 0 {
+			continue
+		}
+
+		// Add MAC address if it's not all zeros
+		mac := iface.HardwareAddr.String()
+		if mac != "" && !strings.HasPrefix(mac, "00:00:00:00:00:00") {
+			macs = append(macs, mac)
+		}
+	}
+
+	return macs
+}

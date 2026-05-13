@@ -1,0 +1,10 @@
+# pack-refs with: peeled fully-peeled sorted 
+365ff445a7267b6266e7deca1f2fd756caee7441 refs/heads/grpc-server-and-client
+0fa3552e93c03cab9b2efd448a3fbdd1164d0c49 refs/heads/library
+e24dc3baa29901e591bbc1ce698e3e7c324b0ef7 refs/heads/main
+8d7845bb1eb764753ba91d2de81c1cff6a20c1c5 refs/heads/network
+816f497a663889cee7dc28a1cf8490351b47d571 refs/heads/questions_for_kick_off-meeting
+affe5326df15a2da4b5e68ca5eef77295c093d9a refs/heads/rfd-0001-job-worker-service
+affe5326df15a2da4b5e68ca5eef77295c093d9a refs/pull/1/head
+0fa3552e93c03cab9b2efd448a3fbdd1164d0c49 refs/pull/2/head
+365ff445a7267b6266e7deca1f2fd756caee7441 refs/pull/3/head

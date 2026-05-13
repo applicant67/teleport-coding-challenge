@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+option go_package = "github.com/ehsaniara/joblet/internal/proto/gen/ipc";
+
+package joblet.ipc;
+
+// IPC Message Types for Unix Socket Communication
+// Used for communication between joblet-core and persist
+
+// IPCMessage is the wire format for IPC communication
+message IPCMessage {
+  uint32 version = 1;        // Protocol version (currently 1)
+  MessageType type = 2;      // Message type
+  string job_uuid = 3;         // Job UUID
+  int64 timestamp = 4;       // Unix nanoseconds
+  uint64 sequence = 5;       // Message sequence number
+  bytes data = 6;            // Serialized payload (LogLine or Metric)
+}
+
+// MessageType indicates the type of message
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_LOG = 1;
+  MESSAGE_TYPE_METRIC = 2;
+  MESSAGE_TYPE_EXEC_EVENT = 3;      // eBPF process execution event
+  MESSAGE_TYPE_CONNECT_EVENT = 4;   // eBPF network connection event
+  MESSAGE_TYPE_ACCEPT_EVENT = 5;    // eBPF accept (incoming connection) event
+  MESSAGE_TYPE_SOCKET_DATA_EVENT = 6; // eBPF sendto/recvfrom event
+  MESSAGE_TYPE_MMAP_EVENT = 7;      // eBPF mmap event
+  MESSAGE_TYPE_MPROTECT_EVENT = 8;  // eBPF mprotect event
+  MESSAGE_TYPE_FILE_EVENT = 9;      // eBPF file access event
+}
+
+// LogLine represents a single log line from a job
+message LogLine {
+  string job_uuid = 1;
+  StreamType stream = 2;     // stdout or stderr
+  int64 timestamp = 3;       // Unix nanoseconds
+  uint64 sequence = 4;       // Sequence number
+  bytes content = 5;         // Log line content
+}
+
+// StreamType indicates stdout or stderr
+enum StreamType {
+  STREAM_TYPE_UNSPECIFIED = 0;
+  STREAM_TYPE_STDOUT = 1;
+  STREAM_TYPE_STDERR = 2;
+}
+
+// Metric represents a metrics sample from a job
+message Metric {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  MetricData data = 4;       // Metric values
+}
+
+// MetricData contains the actual metric values
+message MetricData {
+  double cpu_usage = 1;           // CPU usage (0.0 - cores)
+  int64 memory_usage = 2;         // Memory usage in bytes
+  double gpu_usage = 3;           // GPU usage (0.0 - 1.0)
+  DiskIO disk_io = 4;             // Disk I/O statistics
+  NetworkIO network_io = 5;       // Network I/O statistics
+}
+
+// DiskIO represents disk I/O statistics
+message DiskIO {
+  int64 read_bytes = 1;
+  int64 write_bytes = 2;
+  int64 read_ops = 3;
+  int64 write_ops = 4;
+}
+
+// NetworkIO represents network I/O statistics
+message NetworkIO {
+  int64 rx_bytes = 1;
+  int64 tx_bytes = 2;
+  int64 rx_packets = 3;
+  int64 tx_packets = 4;
+}
+
+// ExecEvent represents a process execution event from eBPF telematics
+message ExecEvent {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  uint32 pid = 4;            // Process ID
+  uint32 ppid = 5;           // Parent process ID
+  uint32 uid = 6;            // User ID
+  uint32 gid = 7;            // Group ID
+  string comm = 8;           // Process command name (max 16 chars)
+  string filename = 9;       // Full path to executable
+  repeated string args = 10; // Command arguments
+}
+
+// ConnectEvent represents a network connection event from eBPF telematics
+message ConnectEvent {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  uint32 pid = 4;            // Process ID
+  string comm = 5;           // Process command name
+  string src_addr = 6;       // Source IP address
+  uint32 src_port = 7;       // Source port
+  string dst_addr = 8;       // Destination IP address
+  uint32 dst_port = 9;       // Destination port
+  string protocol = 10;      // Protocol (TCP, UDP)
+}
+
+// AcceptEvent represents an incoming connection accept from eBPF telematics
+message AcceptEvent {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  uint32 pid = 4;            // Process ID
+  string comm = 5;           // Process command name
+  string src_addr = 6;       // Remote (client) IP address
+  uint32 src_port = 7;       // Remote (client) port
+  string dst_addr = 8;       // Local IP address
+  uint32 dst_port = 9;       // Local port (listening port)
+  string protocol = 10;      // Protocol (TCP)
+}
+
+// SocketDataEvent represents sendto/recvfrom events from eBPF telematics
+message SocketDataEvent {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  uint32 pid = 4;            // Process ID
+  string comm = 5;           // Process command name
+  string direction = 6;      // "send" or "recv"
+  string addr = 7;           // Remote IP address
+  uint32 port = 8;           // Remote port
+  string protocol = 9;       // Protocol (TCP, UDP)
+  int64 bytes = 10;          // Bytes transferred
+}
+
+// MmapEvent represents memory mapping events from eBPF telematics
+message MmapEvent {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  uint32 pid = 4;            // Process ID
+  string comm = 5;           // Process command name
+  uint64 addr = 6;           // Memory address
+  uint64 length = 7;         // Mapping length
+  uint32 prot = 8;           // Protection flags (PROT_READ, PROT_WRITE, PROT_EXEC)
+  uint32 flags = 9;          // Mapping flags (MAP_SHARED, MAP_PRIVATE, MAP_ANONYMOUS)
+  string filename = 10;      // File being mapped (if file-backed)
+}
+
+// MprotectEvent represents memory protection change events from eBPF telematics
+message MprotectEvent {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  uint32 pid = 4;            // Process ID
+  string comm = 5;           // Process command name
+  uint64 addr = 6;           // Memory address
+  uint64 length = 7;         // Region length
+  uint32 prot = 8;           // New protection flags (PROT_READ, PROT_WRITE, PROT_EXEC)
+}
+
+// FileEvent represents file access events from eBPF telematics
+message FileEvent {
+  string job_uuid = 1;
+  int64 timestamp = 2;       // Unix nanoseconds
+  uint64 sequence = 3;       // Sequence number
+  uint32 pid = 4;            // Process ID
+  string comm = 5;           // Process command name
+  string path = 6;           // File path
+  string operation = 7;      // "read", "write", "create", "delete"
+  int64 bytes = 8;           // Bytes read/written (if applicable)
+}

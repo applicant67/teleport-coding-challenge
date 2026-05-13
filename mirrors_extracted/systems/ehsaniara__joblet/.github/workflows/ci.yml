@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - run: go mod download
+
+      - run: go vet ./...
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+        env:
+          SKIP_MONITORING_INTEGRATION_TESTS: "true"
+
+      - run: go tool cover -func=coverage.out
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+  build:
+    name: Build ${{ matrix.component }}-${{ matrix.arch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+        component: [ joblet, rnx, persist, state ]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev-$(git rev-parse --short HEAD)")
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+
+      - name: Build ${{ matrix.component }}
+        run: |
+          LDFLAGS="-X main.version=${{ steps.version.outputs.version }} -X main.commit=${{ steps.version.outputs.commit }} -X main.buildTime=${{ steps.version.outputs.build_time }} -w -s"
+
+          if [ "${{ matrix.component }}" = "persist" ]; then
+            cd persist
+            GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o ../bin/${{ matrix.component }}-${{ matrix.arch }} ./cmd/persist
+          elif [ "${{ matrix.component }}" = "state" ]; then
+            cd state
+            GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o ../bin/${{ matrix.component }}-${{ matrix.arch }} ./cmd/state
+          else
+            mkdir -p bin
+            GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o bin/${{ matrix.component }}-${{ matrix.arch }} ./cmd/${{ matrix.component }}
+          fi
+
+      - name: Verify binary
+        run: |
+          file bin/${{ matrix.component }}-${{ matrix.arch }}
+          ls -la bin/${{ matrix.component }}-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.component }}-${{ matrix.arch }}
+          path: bin/${{ matrix.component }}-${{ matrix.arch }}
+          retention-days: 7

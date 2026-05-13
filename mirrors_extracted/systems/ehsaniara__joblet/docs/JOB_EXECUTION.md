@@ -1,0 +1,653 @@
+# Joblet Job Execution Guide
+
+This comprehensive guide provides detailed information on job execution within the Joblet platform, covering resource
+management, process isolation, scheduling, and advanced orchestration capabilities.
+
+## Document Structure
+
+- [Basic Job Execution](#basic-job-execution)
+- [Resource Limits](#resource-limits)
+- [File Management](#file-management)
+- [Environment Variables](#environment-variables)
+- [Job Scheduling](#job-scheduling)
+- [Job Lifecycle](#job-lifecycle)
+- [Output and Logging](#output-and-logging)
+- [Metrics and Telemetry](#metrics-and-telemetry)
+- [Advanced Features](#advanced-features)
+- [Best Practices](#best-practices)
+
+## Fundamental Job Execution
+
+### Basic Command Execution
+
+All job submissions through the `rnx job run` interface execute within production-grade isolation boundaries using
+minimal chroot environments:
+
+```bash
+# Run a single command
+rnx job run echo "Hello, Joblet!"
+
+# Run command with arguments
+rnx job run ls -la /
+
+# Run shell command
+rnx job run sh -c "echo 'Current time:' && date"
+
+# Run Python script
+rnx job run python3 -c "print('Hello from Python')"
+```
+
+**Execution Context:**
+
+- **Service Layer**: JobService for production workload management
+- **Job Classification**: Standard execution mode (automatically determined)
+- **Isolation Model**: Minimal chroot environment with kernel-enforced security boundaries
+- **Design Purpose**: Secure execution of user-submitted workloads with resource guarantees
+
+### Complex Command Composition
+
+```bash
+# Using shell
+rnx job run bash -c "cd /tmp && echo 'test' > file.txt && cat file.txt"
+
+# Using && operator
+rnx job run sh -c "apt update && apt install -y curl"
+
+# Multi-line scripts
+rnx job run bash -c '
+  echo "Starting process..."
+  for i in {1..5}; do
+    echo "Step $i"
+    sleep 1
+  done
+  echo "Process complete!"
+'
+```
+
+## Resource Management and Constraints
+
+### CPU Resource Allocation
+
+```bash
+# Limit to 50% of one CPU core
+rnx job run --max-cpu=50 stress-ng --cpu 1 --timeout 60s
+
+# Simple CPU test: 50% usage on core 0 for 2 minutes
+rnx job run --max-cpu=50 --cpu-cores=0 bash -c 'timeout 120s bash -c "while true; do :; done"; exit 0'
+
+# Limit to 2 full CPU cores (200%)
+rnx job run --max-cpu=200 python3 parallel_processing.py
+
+# Bind to specific CPU cores
+rnx job run --cpu-cores="0,2,4,6" compute_intensive_task
+
+# Range of cores
+rnx job run --cpu-cores="0-3" make -j4
+```
+
+CPU allocation methodology:
+
+- **100**: Equivalent to one complete CPU core
+- **50**: Half of a CPU core (50% utilization cap)
+- **200**: Two complete CPU cores
+- **0**: No restriction (access to all available cores)
+
+### Memory Resource Management
+
+```bash
+# Limit to 512MB
+rnx job run --max-memory=512 python3 data_processing.py
+
+# Limit to 2GB
+rnx job run --max-memory=2048 java -jar app.jar
+
+# Combine with CPU limits
+rnx job run --max-cpu=150 --max-memory=1024 node app.js
+```
+
+Memory enforcement characteristics:
+
+- **OOM Protection**: Process termination upon memory limit violation
+- **Comprehensive Accounting**: Includes resident set size (RSS), cache, and buffer memory
+- **Swap Prevention**: Swap space disabled within job namespaces for predictable performance
+
+### I/O Bandwidth Management
+
+```bash
+# Limit to 10MB/s
+rnx job run --max-iobps=10485760 dd if=/dev/zero of=/work/test.dat bs=1M count=100
+
+# Limit to 100MB/s
+rnx job run --max-iobps=104857600 tar -czf backup.tar.gz /data
+
+# Combine all limits
+rnx job run \
+  --max-cpu=100 \
+  --max-memory=2048 \
+  --max-iobps=52428800 \
+  rsync -av /source/ /dest/
+```
+
+I/O bandwidth enforcement details:
+
+- **Scope**: Applied to all block device operations
+- **Coverage**: Encompasses both read and write operations
+- **Unit**: Specified in bytes per second
+
+## File Transfer and Management
+
+### File Upload Operations
+
+```bash
+# Upload single file
+rnx job run --upload=script.py python3 script.py
+
+# Upload multiple files
+rnx job run \
+  --upload=config.json \
+  --upload=data.csv \
+  python3 process.py config.json data.csv
+
+# Upload and rename
+echo "data" > local.txt
+rnx job run --upload=local.txt cat local.txt
+```
+
+### Uploading Directories
+
+```bash
+# Upload entire directory
+rnx job run --upload=./project npm start
+
+# Upload directory with specific structure
+rnx job run --upload=./src python3 -m src.main
+
+# Large directory upload
+rnx job run --upload=./dataset python3 train_model.py
+```
+
+### Working Directory
+
+```bash
+# Default working directory is /work
+rnx job run pwd  # Output: /work
+
+# Files uploaded are available in /work
+rnx job run --upload=./app ls -la
+```
+
+### File Access in Jobs
+
+```bash
+# Uploaded files are in current directory
+rnx job run --upload=data.txt cat data.txt
+
+# Access uploaded directory contents
+rnx job run --upload=./config ls -la
+
+# Write output files
+rnx job run --volume=output python3 -c "
+with open('/volumes/output/result.txt', 'w') as f:
+    f.write('Processing complete')
+"
+```
+
+## Environment Variables
+
+### Setting Environment Variables
+
+```bash
+# Single variable
+rnx job run --env=DEBUG=true --runtime=openjdk:21 java App
+
+# Multiple variables
+rnx job run \
+  --env=DATABASE_URL=postgres://localhost/db \
+  --env=API_KEY=secret123 \
+  --env=JAVA_ENV=production \
+  --runtime=openjdk:21 java Application
+
+# Variables with spaces
+rnx job run --env="MESSAGE=Hello World" echo '$MESSAGE'
+```
+
+### Default Environment
+
+Every job has these variables set:
+
+- `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`
+- `HOME=/work`
+- `USER=nobody` (or configured user)
+- `PWD=/work`
+
+### Using Environment Files
+
+```bash
+# Create env file for ML training job
+cat > .env << EOF
+MODEL_PATH=/volumes/models/bert-base
+DATASET_PATH=/volumes/datasets/training
+GPU_MEMORY_FRACTION=0.8
+BATCH_SIZE=32
+LEARNING_RATE=0.001
+EOF
+
+# Upload and source for training job
+rnx job run --upload=.env python3 train_model.py
+```
+
+## Job Scheduling
+
+### Relative Time Scheduling
+
+```bash
+# Run in 5 minutes
+rnx job run --schedule="5min" backup.sh
+
+# Run in 2 hours
+rnx job run --schedule="2h" cleanup.sh
+
+# Run in 30 seconds
+rnx job run --schedule="30s" quick_task.sh
+
+# Supported units: s, m, min, h, d
+```
+
+### Absolute Time Scheduling
+
+```bash
+# Run at specific time (RFC3339 format)
+rnx job run --schedule="2025-08-03T15:00:00Z" daily_report.py
+
+# With timezone
+rnx job run --schedule="2025-08-03T15:00:00-07:00" meeting_reminder.sh
+
+# Tomorrow at noon
+TOMORROW_NOON=$(date -d "tomorrow 12:00" --rfc-3339=seconds)
+rnx job run --schedule="$TOMORROW_NOON" lunch_reminder.sh
+```
+
+### Managing Scheduled Jobs
+
+```bash
+# List scheduled jobs
+rnx job list --json | jq '.[] | select(.status == "SCHEDULED")'
+
+# Cancel scheduled job
+rnx job stop <job-uuid>
+
+# Example with actual UUID:
+rnx job stop f47ac10b-58cc-4372-a567-0e02b2c3d479
+
+# Check when job will run
+rnx job status <job-uuid>
+```
+
+## Job Lifecycle
+
+### Job Identification
+
+Each job is assigned a unique UUID (Universally Unique Identifier) when created. Job UUIDs are in the format:
+`f47ac10b-58cc-4372-a567-0e02b2c3d479`
+
+**Short UUIDs:** All commands support short-form UUIDs (first 8 characters) if they uniquely identify a job.
+For example, `f47ac10b` instead of the full UUID.
+
+Use job UUIDs to:
+
+- Check job status: `rnx job status f47ac10b`
+- View job logs: `rnx job log f47ac10b`
+- View resource metrics: `rnx job metrics f47ac10b`
+- View eBPF telematics events: `rnx job telematics f47ac10b`
+- Stop running jobs: `rnx job stop f47ac10b`
+- Cancel scheduled jobs: `rnx job cancel f47ac10b`
+- Delete jobs: `rnx job delete f47ac10b`
+
+### Job States
+
+1. **INITIALIZING** - Job accepted, preparing execution
+2. **SCHEDULED** - Job scheduled for future execution
+3. **RUNNING** - Job actively executing
+4. **COMPLETED** - Job finished successfully (exit code 0)
+5. **FAILED** - Job finished with error (non-zero exit code)
+6. **STOPPED** - Job manually stopped
+7. **TIMEOUT** - Job exceeded its execution timeout (exit code 124)
+
+### Monitoring Job Progress
+
+```bash
+# Real-time status
+watch -n 1 rnx job status <job-uuid>
+
+# Example with actual UUID:
+watch -n 1 rnx job status f47ac10b-58cc-4372-a567-0e02b2c3d479
+
+# Stream logs (use Ctrl+C to stop)
+rnx job log <job-uuid>
+
+# Example with actual UUID:
+rnx job log f47ac10b-58cc-4372-a567-0e02b2c3d479
+
+# List running jobs
+rnx job list --json | jq '.[] | select(.status == "RUNNING")'
+```
+
+### Job Completion
+
+```bash
+# Check exit code
+rnx job status <job-uuid> | grep "Exit Code"
+
+# Get final output
+rnx job log <job-uuid> | tail -20
+
+# Script to wait for completion
+JOB_UUID=$(rnx job run --json long_task.sh | jq -r .id)
+# JOB_UUID will be something like: f47ac10b-58cc-4372-a567-0e02b2c3d479
+while [[ $(rnx job status --json $JOB_UUID | jq -r .status) == "RUNNING" ]]; do
+  sleep 5
+done
+echo "Job completed with exit code: $(rnx job status --json $JOB_UUID | jq .exit_code)"
+```
+
+## Output and Logging
+
+### Capturing Output
+
+```bash
+# Save logs to file
+rnx job log <job-uuid> > error.log
+
+# Example with actual UUID:
+rnx job log f47ac10b-58cc-4372-a567-0e02b2c3d479 > error.log
+
+# Stream to file
+rnx job log <job-uuid> | tee running.log
+
+# Parse JSON output
+rnx job run --json echo "test" | jq .
+
+# Get only stdout
+rnx job log <job-uuid> 2>/dev/null
+```
+
+### Log Formatting
+
+```bash
+# Stream logs (use Ctrl+C to stop)
+rnx job log <job-uuid>
+
+# Filter logs with grep
+rnx job log <job-uuid> | grep ERROR
+
+# Get last N lines using standard tools
+rnx job log <job-uuid> | tail -100
+```
+
+### Persistent Output
+
+```bash
+# Use volume for output files
+rnx volume create results --size=10GB
+rnx job run --volume=results python3 analysis.py
+
+# Retrieve results
+rnx job run --volume=results cat /volumes/results/report.pdf > report.pdf
+```
+
+## Metrics and Telemetry
+
+### Resource Metrics
+
+View CPU, memory, I/O, network, and GPU metrics for a job:
+
+```bash
+# View metrics for a job (supports short UUIDs)
+rnx job metrics f47ac10b
+
+# Output as JSON
+rnx --json job metrics f47ac10b
+```
+
+### eBPF Telematics
+
+For detailed telematics into job behavior, use the `telematics` command to view eBPF security events:
+
+```bash
+# View eBPF telematics events
+rnx job telematics f47ac10b
+
+# Filter specific event types
+rnx job telematics f47ac10b --types exec,connect
+```
+
+**Available eBPF Events:**
+
+| Event Type | Description                                      |
+|------------|--------------------------------------------------|
+| EXEC       | Process executions (fork/exec syscalls)          |
+| CONNECT    | Outgoing network connections (connect syscall)   |
+| ACCEPT     | Incoming network connections (accept syscall)    |
+| SEND/RECV  | Socket data transfers (sendto/recvfrom syscalls) |
+| MMAP       | Memory mappings with executable permissions      |
+| MPROTECT   | Memory protection changes adding exec permission |
+
+**Filtering eBPF Events:**
+
+```bash
+# Filter by event type with grep
+rnx job telematics f47ac10b | grep EXEC
+rnx job telematics f47ac10b | grep CONNECT
+rnx job telematics f47ac10b | grep ACCEPT
+rnx job telematics f47ac10b | grep MMAP
+
+# Or use the --types flag
+rnx job telematics f47ac10b --types exec
+rnx job telematics f47ac10b --types exec,connect,accept
+```
+
+**Use Cases:**
+
+- **Security Monitoring**: Track what processes a job spawns and what network connections it makes
+- **Debugging**: Understand job behavior and dependencies
+- **Compliance**: Audit data access and external connections
+
+## Advanced Features
+
+### Complex Workflows
+
+```bash
+#!/bin/bash
+# Multi-stage data processing pipeline
+
+# Stage 1: Data preparation
+PREP_JOB=$(rnx job run --json \
+  --volume=pipeline-data \
+  --upload=prepare_data.py \
+  python3 prepare_data.py | jq -r .id)
+# PREP_JOB will be something like: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+# Wait for completion
+while [[ $(rnx job status --json $PREP_JOB | jq -r .status) == "RUNNING" ]]; do
+  sleep 2
+done
+
+# Stage 2: Parallel processing
+for i in {1..4}; do
+  rnx job run \
+    --volume=pipeline-data \
+    --max-cpu=100 \
+    --upload=process_chunk.py \
+    python3 process_chunk.py $i &
+done
+wait
+
+# Stage 3: Merge results
+rnx job run \
+  --volume=pipeline-data \
+  --upload=merge_results.py \
+  python3 merge_results.py
+```
+
+### Job Dependencies
+
+```bash
+# Simple dependency chain
+JOB1=$(rnx job run --json setup.sh | jq -r .id)
+# JOB1 will be something like: 12345678-abcd-ef12-3456-7890abcdef12
+# Wait for job1
+while [[ $(rnx job status --json $JOB1 | jq -r .status) == "RUNNING" ]]; do
+  sleep 1
+done
+
+# Only run if job1 succeeded
+if [[ $(rnx job status --json $JOB1 | jq .exit_code) -eq 0 ]]; then
+  rnx job run process.sh
+fi
+```
+
+### Resource Pools
+
+```bash
+# Create dedicated network for job group
+rnx network create batch-network --cidr=10.50.0.0/24
+
+# Run jobs in same network
+for task in tasks/*.sh; do
+  rnx job run \
+    --network=batch-network \
+    --volume=shared-data \
+    --max-cpu=50 \
+    bash "$task"
+done
+```
+
+### Interactive Jobs
+
+```bash
+# Note: Joblet doesn't support interactive TTY, but you can simulate:
+
+# Create script that reads from volume
+cat > interactive.sh << 'EOF'
+#!/bin/bash
+while true; do
+  if [[ -f /volumes/commands/next.txt ]]; then
+    cmd=$(cat /volumes/commands/next.txt)
+    rm /volumes/commands/next.txt
+    eval "$cmd"
+  fi
+  sleep 1
+done
+EOF
+
+# Start "interactive" job
+rnx volume create commands --size=100MB
+rnx job run --volume=commands --upload=interactive.sh bash interactive.sh
+
+# Send commands
+rnx job run --volume=commands sh -c 'echo "ls -la" > /volumes/commands/next.txt'
+```
+
+## Best Practices
+
+### 1. Resource Planning
+
+```bash
+# Test resource requirements first
+rnx job run --max-memory=512 python3 script.py
+
+# If OOM, increase limit
+rnx job run --max-memory=1024 python3 script.py
+
+# Monitor actual usage
+rnx monitor status
+```
+
+### 2. Error Handling
+
+```bash
+# Robust job submission
+submit_job() {
+  local cmd="$1"
+  local max_retries=3
+  local retry=0
+  
+  while [ $retry -lt $max_retries ]; do
+    JOB_UUID=$(rnx job run --json $cmd | jq -r .id)
+    
+    if [ $? -eq 0 ]; then
+      echo "Job submitted: $JOB_UUID"  # e.g., f47ac10b-58cc-4372-a567-0e02b2c3d479
+      return 0
+    fi
+    
+    retry=$((retry + 1))
+    sleep 2
+  done
+  
+  echo "Failed to submit job after $max_retries attempts"
+  return 1
+}
+```
+
+### 3. Cleanup
+
+```bash
+# Always cleanup volumes
+trap 'rnx volume remove temp-vol 2>/dev/null' EXIT
+
+rnx volume create temp-vol --size=1GB
+rnx job run --volume=temp-vol process_data.sh
+```
+
+### 4. Logging
+
+```bash
+# Comprehensive logging
+JOB_UUID=$(rnx job run --json \
+  backup.sh | jq -r .id)
+# JOB_UUID will be something like: f47ac10b-58cc-4372-a567-0e02b2c3d479
+
+# Save all job info
+mkdir -p logs/$JOB_UUID
+rnx job status $JOB_UUID > logs/$JOB_UUID/status.txt
+rnx job log $JOB_UUID > logs/$JOB_UUID/error.log
+```
+
+### 5. Security
+
+```bash
+# Don't embed secrets in commands
+# Bad:
+rnx job run curl -H "Authorization: Bearer secret123" api.example.com
+
+# Good:
+rnx job run --env=API_TOKEN=secret123 \
+  curl -H "Authorization: Bearer \$API_TOKEN" api.example.com
+```
+
+## Troubleshooting
+
+Common issues and solutions:
+
+1. **Job Fails Immediately**
+    - Check command syntax
+    - Verify uploaded files exist
+    - Check resource limits
+
+2. **Out of Memory**
+    - Increase --max-memory
+    - Optimize memory usage
+    - Use streaming processing
+
+3. **Job Hangs**
+    - Check CPU limits
+    - Monitor with `rnx job log <job-uuid>`
+   - Set a per-job timeout: `rnx job run --timeout=5m long_task.sh`
+   - Or configure global timeout in `joblet-config.yml` via `jobTimeout`
+
+4. **File Not Found**
+    - Verify upload succeeded
+    - Check working directory
+    - Use absolute paths
+
+See [Troubleshooting Guide](./TROUBLESHOOTING.md) for more solutions.

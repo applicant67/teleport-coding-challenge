@@ -1,0 +1,6 @@
+# server-name: localhost  # Uncomment if connecting to remote server
+addr: localhost:9000
+cert: certs/read.crt
+key: certs/read.key
+ca: certs/ca.crt
+timeout: 30s

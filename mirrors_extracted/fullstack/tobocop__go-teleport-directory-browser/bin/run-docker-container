@@ -1,0 +1,9 @@
+#! /usr/bin/env bash
+
+docker create \
+      --name directory-browser \
+      --rm \
+      -p 8081:8080 \
+      directory-browser:latest
+
+docker start directory-browser -a

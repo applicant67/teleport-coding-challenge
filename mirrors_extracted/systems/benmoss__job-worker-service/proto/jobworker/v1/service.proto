@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package jobworker.v1;
+
+option go_package = "github.com/benmoss/job-worker-service/pkg/api/v1";
+
+// ResourceLimits specifies cgroups v2 resource constraints.
+// All fields are optional; zero values mean no limit.
+message ResourceLimits {
+  double cpu_max = 1;          // Fraction of CPU (0.5 = half core, 2.0 = two cores)
+  int64 memory_max_bytes = 2;  // Memory limit in bytes
+  int64 io_max_read_bps = 3;   // Max read throughput in bytes/sec
+  int64 io_max_write_bps = 4;  // Max write throughput in bytes/sec
+}
+
+// StartJobRequest specifies a process to execute.
+message StartJobRequest {
+  string command = 1;           // Path to executable (required)
+  repeated string args = 2;     // Command-line arguments
+  ResourceLimits limits = 3;    // Resource limits (optional)
+}
+
+message StartJobResponse {
+  uint64 job_id = 1;  // Unique identifier for the created job
+}
+
+message StopJobRequest {
+  uint64 job_id = 1;
+}
+
+message StopJobResponse {}
+
+message GetStatusRequest {
+  uint64 job_id = 1;
+}
+
+// JobState indicates the current state of a job.
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;  // Invalid state
+  JOB_STATE_RUNNING = 1;      // Process is currently executing
+  JOB_STATE_COMPLETED = 2;    // Process exited on its own
+	JOB_STATE_STOPPING = 3;     // StopJob called, waiting on exit
+  JOB_STATE_STOPPED = 4;      // Terminated by user via StopJob
+  JOB_STATE_KILLED = 5;       // Killed by signal (e.g., OOM) without StopJob
+}
+
+// GetStatusResponse returns the current state of a job.
+message GetStatusResponse {
+  uint64 job_id = 1;
+  JobState state = 2;
+  int32 exit_code = 3;  // Exit code (only valid if state != RUNNING)
+  string command = 4;
+  repeated string args = 5;
+}
+
+message GetLogsRequest {
+  uint64 job_id = 1;
+  bool follow = 2;  // If true, stream waits for new output until job exits
+}
+
+// GetLogsResponse contains a chunk of output data.
+// Output is opaque binary data with no encoding assumptions.
+message GetLogsResponse {
+  bytes data = 1;
+}
+
+// JobWorkerService manages Linux processes with resource constraints.
+service JobWorkerService {
+  // StartJob creates and executes a new job. Returns after the process starts.
+  // Errors: INVALID_ARGUMENT (empty command), PERMISSION_DENIED
+  rpc StartJob(StartJobRequest) returns (StartJobResponse);
+
+  // StopJob terminates a job and all its child processes.
+  // Errors: NOT_FOUND, PERMISSION_DENIED
+  rpc StopJob(StopJobRequest) returns (StopJobResponse);
+
+  // GetStatus returns the current state of a job.
+  // Errors: NOT_FOUND, PERMISSION_DENIED
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+
+  // GetLogs streams the job's combined stdout/stderr from the beginning.
+  // If follow=true, the stream continues until the job exits.
+  // If follow=false, returns current output and closes.
+  // Errors: NOT_FOUND, PERMISSION_DENIED
+  rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
+}

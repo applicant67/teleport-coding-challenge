@@ -1,0 +1,486 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  security-events: write
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  # Build all binaries
+  build-binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          # Clean for package format
+          CLEAN=$(echo "$VERSION" | sed 's/-[0-9]*-g[a-f0-9]*$//')
+          echo "version=$CLEAN" >> $GITHUB_OUTPUT
+          echo "Building version: $CLEAN"
+
+      - name: Build all binaries
+        run: |
+          LDFLAGS="-X main.version=${{ steps.version.outputs.version }} -w -s"
+
+          # Main binaries
+          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o joblet-${{ matrix.arch }} ./cmd/joblet
+          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o rnx-${{ matrix.arch }} ./cmd/rnx
+
+          # Submodule binaries
+          cd persist && GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o ../persist-${{ matrix.arch }} ./cmd/persist && cd ..
+          cd state && GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o ../state-${{ matrix.arch }} ./cmd/state && cd ..
+
+          ls -la *-${{ matrix.arch }}
+
+      - name: Verify built binary architecture
+        run: |
+          EXPECTED_ARCH="${{ matrix.arch }}"
+          if [ "$EXPECTED_ARCH" = "arm64" ]; then
+            EXPECTED_PATTERN="aarch64|ARM aarch64"
+          else
+            EXPECTED_PATTERN="x86-64|x86_64"
+          fi
+
+          echo "Verifying built binaries are $EXPECTED_ARCH..."
+          for bin in joblet rnx persist state; do
+            ACTUAL=$(file "${bin}-${{ matrix.arch }}")
+            if ! echo "$ACTUAL" | grep -qE "$EXPECTED_PATTERN"; then
+              echo "ERROR: ${bin}-${{ matrix.arch }} has wrong architecture!"
+              echo "  Expected: $EXPECTED_ARCH"
+              echo "  Actual: $ACTUAL"
+              exit 1
+            fi
+            echo "OK: ${bin}-${{ matrix.arch }} is $EXPECTED_ARCH"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: joblet-binary-${{ matrix.arch }}
+          path: joblet-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rnx-binary-${{ matrix.arch }}
+          path: rnx-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: persist-binary-${{ matrix.arch }}
+          path: persist-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: state-binary-${{ matrix.arch }}
+          path: state-${{ matrix.arch }}
+
+  # Build Debian packages
+  build-deb:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: joblet-binary-${{ matrix.arch }}
+          path: ./
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rnx-binary-${{ matrix.arch }}
+          path: ./
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: persist-binary-${{ matrix.arch }}
+          path: ./
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: state-binary-${{ matrix.arch }}
+          path: ./
+
+      - name: Prepare binaries
+        run: |
+          echo "Files after download:"
+          ls -la
+          # Remove repo directories that conflict with binary names
+          rm -rf persist state
+          mv joblet-${{ matrix.arch }} joblet
+          mv rnx-${{ matrix.arch }} rnx
+          mv persist-${{ matrix.arch }} persist
+          mv state-${{ matrix.arch }} state
+          chmod +x joblet rnx persist state
+          echo "Files after rename:"
+          ls -la joblet rnx persist state
+          file joblet rnx persist state
+
+      - name: Verify binary architecture
+        run: |
+          EXPECTED_ARCH="${{ matrix.arch }}"
+          if [ "$EXPECTED_ARCH" = "arm64" ]; then
+            EXPECTED_PATTERN="aarch64|ARM aarch64"
+          else
+            EXPECTED_PATTERN="x86-64|x86_64"
+          fi
+
+          echo "Verifying binaries are $EXPECTED_ARCH..."
+          FAILED=0
+          for bin in joblet rnx persist state; do
+            ACTUAL=$(file "$bin")
+            if ! echo "$ACTUAL" | grep -qE "$EXPECTED_PATTERN"; then
+              echo "ERROR: $bin has wrong architecture!"
+              echo "  Expected: $EXPECTED_ARCH ($EXPECTED_PATTERN)"
+              echo "  Actual: $ACTUAL"
+              FAILED=1
+            else
+              echo "OK: $bin is $EXPECTED_ARCH"
+            fi
+          done
+
+          if [ $FAILED -eq 1 ]; then
+            echo "Architecture verification failed!"
+            exit 1
+          fi
+          echo "All binaries verified as $EXPECTED_ARCH"
+
+      - name: Build Debian package
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Checking binaries exist:"
+          ls -la joblet rnx persist state
+          chmod +x scripts/build-deb.sh
+          ./scripts/build-deb.sh ${{ matrix.arch }} ${{ needs.build-binaries.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+          path: "*.deb"
+
+  # Build RPM packages
+  build-rpm:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            rpm_arch: x86_64
+          - arch: arm64
+            rpm_arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: joblet-binary-${{ matrix.arch }}
+          path: ./
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rnx-binary-${{ matrix.arch }}
+          path: ./
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: persist-binary-${{ matrix.arch }}
+          path: ./
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: state-binary-${{ matrix.arch }}
+          path: ./
+
+      - name: Prepare binaries
+        run: |
+          echo "Files after download:"
+          ls -la
+          # Remove repo directories that conflict with binary names
+          rm -rf persist state
+          mv joblet-${{ matrix.arch }} joblet
+          mv rnx-${{ matrix.arch }} rnx
+          mv persist-${{ matrix.arch }} persist
+          mv state-${{ matrix.arch }} state
+          chmod +x joblet rnx persist state
+          echo "Files after rename:"
+          ls -la joblet rnx persist state
+          file joblet rnx persist state
+
+      - name: Verify binary architecture
+        run: |
+          EXPECTED_ARCH="${{ matrix.arch }}"
+          if [ "$EXPECTED_ARCH" = "arm64" ]; then
+            EXPECTED_PATTERN="aarch64|ARM aarch64"
+          else
+            EXPECTED_PATTERN="x86-64|x86_64"
+          fi
+
+          echo "Verifying binaries are $EXPECTED_ARCH..."
+          FAILED=0
+          for bin in joblet rnx persist state; do
+            ACTUAL=$(file "$bin")
+            if ! echo "$ACTUAL" | grep -qE "$EXPECTED_PATTERN"; then
+              echo "ERROR: $bin has wrong architecture!"
+              echo "  Expected: $EXPECTED_ARCH ($EXPECTED_PATTERN)"
+              echo "  Actual: $ACTUAL"
+              FAILED=1
+            else
+              echo "OK: $bin is $EXPECTED_ARCH"
+            fi
+          done
+
+          if [ $FAILED -eq 1 ]; then
+            echo "Architecture verification failed!"
+            exit 1
+          fi
+          echo "All binaries verified as $EXPECTED_ARCH"
+
+      - name: Install RPM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build RPM package
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Checking binaries exist:"
+          ls -la joblet rnx persist state
+          chmod +x scripts/build-rpm.sh
+          ./scripts/build-rpm.sh ${{ matrix.rpm_arch }} ${{ needs.build-binaries.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.rpm_arch }}
+          path: "*.rpm"
+
+  # Build cross-platform RNX CLI
+  build-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build cross-platform CLI
+        run: |
+          mkdir -p dist
+          LDFLAGS="-X main.version=${{ steps.version.outputs.version }} -w -s"
+
+          # Linux
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/rnx-linux-amd64 ./cmd/rnx
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/rnx-linux-arm64 ./cmd/rnx
+
+          # macOS
+          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/rnx-darwin-amd64 ./cmd/rnx
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/rnx-darwin-arm64 ./cmd/rnx
+
+          # Windows
+          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/rnx-windows-amd64.exe ./cmd/rnx
+
+          # Create archives
+          cd dist
+          tar -czf rnx-${{ steps.version.outputs.version }}-linux-amd64.tar.gz rnx-linux-amd64
+          tar -czf rnx-${{ steps.version.outputs.version }}-linux-arm64.tar.gz rnx-linux-arm64
+          tar -czf rnx-${{ steps.version.outputs.version }}-darwin-amd64.tar.gz rnx-darwin-amd64
+          tar -czf rnx-${{ steps.version.outputs.version }}-darwin-arm64.tar.gz rnx-darwin-arm64
+          zip rnx-${{ steps.version.outputs.version }}-windows-amd64.zip rnx-windows-amd64.exe
+
+          sha256sum *.tar.gz *.zip > checksums.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+
+  # Test packages
+  test-packages:
+    needs: [ build-deb, build-rpm ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages/
+
+      - name: Test Debian packages
+        run: |
+          for deb in packages/deb-*/*.deb; do
+            echo "Testing $deb..."
+            dpkg-deb -I "$deb"
+            dpkg-deb -c "$deb"
+          done
+
+      - name: Test RPM packages
+        run: |
+          sudo apt-get update && sudo apt-get install -y rpm
+          for rpm in packages/rpm-*/*.rpm; do
+            echo "Testing $rpm..."
+            rpm -qip "$rpm"
+            rpm -qlp "$rpm"
+          done
+
+  # Security scan
+  security-scan:
+    needs: [ build-deb, build-rpm ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages/
+
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './packages'
+          format: 'table'
+          exit-code: '0'  # Don't fail on vulnerabilities, just report
+
+  # Create GitHub Release
+  release:
+    needs: [ build-deb, build-rpm, build-cli, build-binaries, test-packages, security-scan ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Organize release files
+        run: |
+          mkdir -p release
+          find artifacts/ -name "*.deb" -exec cp {} release/ \;
+          find artifacts/ -name "*.rpm" -exec cp {} release/ \;
+          find artifacts/ -name "*.tar.gz" -exec cp {} release/ \;
+          find artifacts/ -name "*.zip" -exec cp {} release/ \;
+
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          ls -la
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            ## Server Installation (Linux)
+
+            ### Debian/Ubuntu
+            ```bash
+            # AMD64 (Intel/AMD)
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet_${{ needs.build-binaries.outputs.version }}_amd64.deb
+            sudo dpkg -i joblet_${{ needs.build-binaries.outputs.version }}_amd64.deb
+
+            # ARM64 (AWS Graviton, ARM servers)
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet_${{ needs.build-binaries.outputs.version }}_arm64.deb
+            sudo dpkg -i joblet_${{ needs.build-binaries.outputs.version }}_arm64.deb
+
+            # Start service
+            sudo systemctl start joblet && sudo systemctl enable joblet
+            ```
+
+            ### RHEL/CentOS/Amazon Linux
+            ```bash
+            # x86_64
+            sudo yum install -y https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet-${{ needs.build-binaries.outputs.version }}-1.x86_64.rpm
+
+            # aarch64 (AWS Graviton)
+            sudo yum install -y https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet-${{ needs.build-binaries.outputs.version }}-1.aarch64.rpm
+
+            # Start service
+            sudo systemctl start joblet && sudo systemctl enable joblet
+            ```
+
+            ---
+
+            ## RNX CLI (Client)
+
+            ### macOS
+            ```bash
+            # Apple Silicon (M1/M2/M3/M4)
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/rnx-${{ github.ref_name }}-darwin-arm64.tar.gz | tar xz
+            sudo mv rnx-darwin-arm64 /usr/local/bin/rnx
+
+            # Intel
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/rnx-${{ github.ref_name }}-darwin-amd64.tar.gz | tar xz
+            sudo mv rnx-darwin-amd64 /usr/local/bin/rnx
+            ```
+
+            ### Windows
+            ```powershell
+            Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/rnx-${{ github.ref_name }}-windows-amd64.zip" -OutFile rnx.zip
+            Expand-Archive rnx.zip -DestinationPath .
+            Move-Item rnx-windows-amd64.exe C:\Windows\rnx.exe
+            ```
+
+            ### Linux
+            ```bash
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/rnx-${{ github.ref_name }}-linux-amd64.tar.gz | tar xz
+            sudo mv rnx-linux-amd64 /usr/local/bin/rnx
+            ```
+
+            ---
+
+            ## Quick Start
+
+            ```bash
+            # 1. Copy client config from server
+            scp your-server:/opt/joblet/config/rnx-config.yml ~/.rnx/
+
+            # 2. Test connection
+            rnx job list
+
+            # 3. Run a job
+            rnx job run echo "Hello from Joblet!"
+            ```
+
+            ---
+
+            ## Verify Checksums
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

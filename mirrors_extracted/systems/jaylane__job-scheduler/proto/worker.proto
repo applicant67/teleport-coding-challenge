@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+option go_package = "github.com/jaylane/job-scheduler/pkg/worker";
+
+service Worker {
+    // StartJob starts a job.
+    rpc StartJob(StartJobRequest) returns (StartJobReponse);
+    // StopJob stops a job.
+    rpc StopJob(StopJobRequest) returns (StopJobResponse);
+    // GetJobStatus gets the status of a job.
+    rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+    /* StreamJobOutput streams the output of a job.
+       Note: If the job is still active when StreamOutputRequest 
+       is sent the cli will tail the output. */ 
+    rpc StreamJobOutput(StreamJobOutputRequest) returns (stream StreamJobOutputResponse);
+}
+
+message StartJobRequest {
+    // The name or path of the command to run.
+    string command = 1;
+    // The arguments to pass to the command.
+    repeated string args = 2;
+}
+
+message StartJobResponse {
+    // The id of the job that was started.
+    string id = 1;
+}
+
+message StopJobRequest {
+    // The id of the job to stop.
+    string id = 1;
+}
+
+message StopJobResponse {
+    string id = 1;
+}
+
+message GetJobStatusRequest {
+    // The id of the job to get the status of.
+    string id = 1;
+}
+
+
+enum Status {
+    UNKNOWN = 0;
+    RUNNING = 1;
+    STOPPED = 2;
+    TERMINATED = 3;
+    COMPLETED = 4;
+}
+
+message GetJobStatusResponse {  
+    // The process id of the job
+    int32 pid = 1;
+    // The exit code of the process
+    int32 exit_code = 2;
+    // Status enum of the job.
+    Status status = 3;
+}
+
+message StreamJobOutputRequest {
+    // The id of the job to stream the output of.
+    string id = 1;
+}
+
+message StreamJobOutputResponse {
+    // The output of the job.
+    bytes output = 1;
+}
+

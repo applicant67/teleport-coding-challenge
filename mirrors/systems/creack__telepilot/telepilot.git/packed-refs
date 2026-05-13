@@ -1,0 +1,19 @@
+# pack-refs with: peeled fully-peeled sorted 
+ab981ceb2df1059852f6683d8a4c81379eaad775 refs/heads/creack/job-manager-blocking
+e91cc5cfa301b4a40767cf01a6414fb19af27189 refs/heads/creack/pivot-root
+1b25b8a9b78ed18b2cbdfc291d13c614a42e7c13 refs/heads/dependabot/go_modules/golang.org/x/net-0.36.0
+ec800a68baffe02539840ea2469fe9919e67cc12 refs/heads/main
+68426dc7b8f20919be23caddcf3c37ec8e34fb46 refs/heads/tmp-tests
+35bf5787b99ad0e0f4b2c3ae4ae9f77d1dfb1fe9 refs/pull/1/head
+ac65076081d437d03ad3aad1b8c9bb06dd6e570d refs/pull/10/head
+1b25b8a9b78ed18b2cbdfc291d13c614a42e7c13 refs/pull/11/head
+f267c1129b6d18ad9bab7655fb2de20414be8f4e refs/pull/11/merge
+c416e936e41a2c4854ba590f1be00388bcf82cbe refs/pull/2/head
+3b7be01e39822fef1e1977921780a9a9bfbdd505 refs/pull/3/head
+4c486fcbf7959402a24697ecd2ec5d8a51b04a1a refs/pull/4/head
+ade02de1e33c32fd9b2f9d1166af712249daf39d refs/pull/5/head
+b7d9248ea6935a388f63eff24407b76898df6790 refs/pull/6/head
+0231d90455ec7c8bd8236b4f2066c3a838129ddc refs/pull/7/head
+51bb5686f3b493f407b8352b79f6e4a902f03198 refs/pull/8/head
+84f0b7ad5f9fe0cc96b7de3c67c969e960dfe3a6 refs/pull/9/head
+ec800a68baffe02539840ea2469fe9919e67cc12 refs/tags/v1.0.0

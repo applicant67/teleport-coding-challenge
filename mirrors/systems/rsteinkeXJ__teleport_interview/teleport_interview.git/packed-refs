@@ -1,0 +1,6 @@
+# pack-refs with: peeled fully-peeled sorted 
+7332b8f51eaba95b37fa3d623d79ed226e989d69 refs/heads/main
+94bf7c5f36828e38eea3d4f018d11b6db38f89ee refs/heads/rss/js-design
+19b7dac7c137163e43e8bcfac227e480f1caf5e9 refs/heads/rss/test-tls
+94bf7c5f36828e38eea3d4f018d11b6db38f89ee refs/pull/1/head
+ea221953f4d7ff434e88da0a5b45d3ef16365cfc refs/pull/1/merge

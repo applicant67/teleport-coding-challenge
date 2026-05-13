@@ -1,0 +1,32 @@
+[req_distinguished_name]
+C  = US
+ST = Washington
+L  = Seattle
+O  = Certificate Authority
+CN = My CA
+
+[v3_ca]
+# this certificate can issue other certificates but cannot be used to create subordinate CAs.
+basicConstraints = critical, CA:TRUE, pathlen:0
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = jobworker.local
+IP.1 = 127.0.0.1
+
+# Subject Alternative Name: Ensure SAN includes localhost for local development
+subjectAltName = @alt_names
+
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_ca
+prompt = no
+
+# CA certificate should be used for certificate signing
+keyUsage = critical, keyCertSign, cRLSign
+
+# Authority Info Access: Points to the OCSP server or issuing CA's location
+# authorityInfoAccess = OCSP;URI:http://ocsp.localhost/ca
+
+# CRL Distribution Points: Specifies where the Certificate Revocation List can be found
+# crlDistributionPoints = URI:http://localhost/crl/ca.crl

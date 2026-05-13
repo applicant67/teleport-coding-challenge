@@ -1,0 +1,12 @@
+# pack-refs with: peeled fully-peeled sorted 
+0fc1d102fc0ac28b077b6ba2b26d73358a2064c8 refs/heads/cli-client
+4a15e94ed86728176ab8510fdbb89770349eb225 refs/heads/core-library
+2bd2c5e20a53e177109060bd3af658112964a873 refs/heads/design-doc
+5101db008237eb6eea0745a88ad990cc80d9b183 refs/heads/grpc-api
+3b4d24a99cb413f03d8c20cc24965cc6e60176bf refs/heads/main
+8bf3d923ba9f496c6d21bcc2d4e715d32b753f34 refs/heads/readme-test
+2bd2c5e20a53e177109060bd3af658112964a873 refs/pull/1/head
+4a15e94ed86728176ab8510fdbb89770349eb225 refs/pull/2/head
+5101db008237eb6eea0745a88ad990cc80d9b183 refs/pull/3/head
+0fc1d102fc0ac28b077b6ba2b26d73358a2064c8 refs/pull/4/head
+8bf3d923ba9f496c6d21bcc2d4e715d32b753f34 refs/pull/5/head

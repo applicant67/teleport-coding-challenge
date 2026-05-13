@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "CommonJS",
+    "lib": [
+      "ES2020",
+      "dom"
+    ],
+    "allowJs": true,
+    "checkJs": true,
+    "jsx": "react",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "client/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "./src/*",
+    "./*.ts"
+  ]
+}

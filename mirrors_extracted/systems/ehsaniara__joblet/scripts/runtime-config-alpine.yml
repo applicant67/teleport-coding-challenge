@@ -1,0 +1,44 @@
+# Runtime Configuration for Alpine Linux
+# This file is automatically selected by the installer based on OS detection.
+#
+# Supported distributions:
+#   - Alpine Linux (all versions)
+#
+# Note: Alpine uses musl libc instead of glibc. Some binaries compiled
+# for glibc-based systems may not work. Use Alpine-specific packages.
+#
+# Runtime Build Isolation:
+#   Runtime builds use OverlayFS-based chroot isolation. The host filesystem
+#   is mounted read-only as the lower layer, and all package installations
+#   (apk, pip, etc.) write to an ephemeral upper layer. Only the resulting
+#   binaries and libraries are copied to the runtime directory.
+#   See: pkg/builder/isolation.go
+
+# Runtime System Configuration
+runtime:
+  base_path: "/opt/joblet/runtimes"
+
+  # Common paths where runtimes may be installed
+  common_paths:
+    - "/usr/local/bin"
+    - "/usr/local/lib"
+    - "/usr/lib/jvm"
+    - "/usr/local/node"
+    - "/usr/local/go"
+
+  # Paths mounted read-only into job sandbox
+  # These provide essential binaries and libraries for job execution
+  allowed_mounts:
+    - "/usr/bin"
+    - "/bin"
+    - "/usr/sbin"               # Network tools (ip, route, etc.)
+    - "/lib"
+    - "/usr/lib"
+    # Network configuration files
+    - "/etc/resolv.conf"        # DNS resolver configuration
+    - "/etc/hosts"              # Local hostname resolution
+    - "/etc/nsswitch.conf"      # Name service switch configuration
+    # SSL certificate directories (Alpine uses /etc/ssl)
+    - "/etc/ssl"
+    - "/usr/share/ca-certificates"
+  # Note: Alpine doesn't have /lib64 or /usr/lib64

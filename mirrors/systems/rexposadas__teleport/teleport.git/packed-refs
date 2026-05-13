@@ -1,0 +1,6 @@
+# pack-refs with: peeled fully-peeled sorted 
+5fc877d14de33f732641b0f309b950ceb9761c75 refs/heads/main
+540070256dca078a64e2b9e610cee0df9746741a refs/heads/start-status-jobs
+7a1c69dc0361075b685ed5ba6c426d018a1c3f45 refs/pull/1/head
+540070256dca078a64e2b9e610cee0df9746741a refs/pull/2/head
+5be68151f9781739bcf2198e2f135dc3502c3f18 refs/pull/2/merge

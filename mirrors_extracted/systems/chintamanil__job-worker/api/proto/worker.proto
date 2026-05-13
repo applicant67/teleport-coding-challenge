@@ -1,0 +1,84 @@
+syntax = "proto3";
+package worker.v1;
+
+option go_package = "github.com/manil/job-worker/pkg/proto";
+
+// WorkerService provides job execution management with process grouping via cgroups v2.
+service WorkerService {
+  // Start a new job. Returns a unique job ID.
+  rpc StartJob(StartJobRequest) returns (StartJobResponse);
+
+  // Stop a running job. Sends SIGKILL via cgroup.kill to entire process tree.
+  rpc StopJob(StopJobRequest) returns (StopJobResponse);
+
+  // Get current status of a job.
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+
+  // Stream combined stdout/stderr output from the start of execution.
+  // Server-side streaming RPC. Late joiners always start from byte 0.
+  rpc StreamOutput(StreamOutputRequest) returns (stream StreamOutputResponse);
+}
+
+message StartJobRequest {
+  // Command to execute (full path or binary name in PATH)
+  string command = 1;
+  // Arguments to pass to the command
+  repeated string args = 2;
+  // CPU limit as fraction of one core (0.5 = 50%, 2.0 = two cores). 0 = unlimited.
+  double cpu_limit = 3;
+  // Memory limit in bytes. 0 = unlimited.
+  int64 memory_limit_bytes = 4;
+  // I/O weight for fair sharing (1-10000, default 100). 0 = use default.
+  int32 io_weight = 5;
+}
+
+message StartJobResponse {
+  // Unique identifier for the created job (UUID v4)
+  string job_id = 1;
+}
+
+message StopJobRequest {
+  // ID of the job to stop
+  string job_id = 1;
+}
+
+message StopJobResponse {}
+
+message GetJobStatusRequest {
+  // ID of the job to query
+  string job_id = 1;
+}
+
+message GetJobStatusResponse {
+  // Unique identifier for the job
+  string job_id = 1;
+  // Current job status
+  JobStatus status = 2;
+  // Exit code (only valid when status is COMPLETED or FAILED)
+  int32 exit_code = 3;
+  // Error message if the job failed to start
+  string error_message = 4;
+  // CN of the client that started this job
+  string owner = 5;
+  // Process ID (0 if not running)
+  int32 pid = 6;
+}
+
+// JobStatus represents the lifecycle state of a job.
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_RUNNING = 1;
+  JOB_STATUS_COMPLETED = 2;
+  JOB_STATUS_FAILED = 3;
+  JOB_STATUS_STOPPED = 4;
+}
+
+message StreamOutputRequest {
+  // ID of the job to stream output from
+  string job_id = 1;
+}
+
+message StreamOutputResponse {
+  // Raw bytes from the combined stdout/stderr stream
+  bytes data = 1;
+}

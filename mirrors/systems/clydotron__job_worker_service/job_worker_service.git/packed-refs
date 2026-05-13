@@ -1,0 +1,5 @@
+# pack-refs with: peeled fully-peeled sorted 
+1a37a42a484a7203b8d478dd8baaa7ad30abc608 refs/heads/main
+a7471371a71858841b2a63353147a94870debc75 refs/heads/rfd/007-job_worker_service
+a7471371a71858841b2a63353147a94870debc75 refs/pull/1/head
+dbddafd9bc2322ae2b2e2229b52293c5800bada4 refs/pull/1/merge

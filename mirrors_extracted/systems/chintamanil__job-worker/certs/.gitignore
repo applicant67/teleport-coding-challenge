@@ -1,0 +1,6 @@
+# Private keys - NEVER commit these
+*-key.pem
+
+# Generated certificates (regenerate with 'make all')
+*.pem
+*.csr

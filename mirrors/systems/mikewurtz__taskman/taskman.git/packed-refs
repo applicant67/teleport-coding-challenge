@@ -1,0 +1,14 @@
+# pack-refs with: peeled fully-peeled sorted 
+e8ffdd8a5795dc21bb9d1a6a5d37bf336d91c6cb refs/heads/designDoc
+c015017beb76274c6f6eb33784fa7e9e94eeca2e refs/heads/feat/cli-mtls-scaffold
+b6fc001d5a58c3ed997b9f0f536439c4a5efad57 refs/heads/feat/start-get-status-stop
+de60ba4e3deed79cd4d6844e947da5ab02e745a8 refs/heads/feat/start-stop-get-status
+be44a50911c41a2450eeacf67849c2c8fab8c689 refs/heads/feat/stream
+bdfcf40806f70a6a71e1ac8d539c95c20f438204 refs/heads/feat/stream-api
+bdfcf40806f70a6a71e1ac8d539c95c20f438204 refs/heads/feat/stream-api-backup
+ac1dafefb4e45a0ee2ca6655b303e7e0e73044c8 refs/heads/main
+e8ffdd8a5795dc21bb9d1a6a5d37bf336d91c6cb refs/pull/1/head
+c015017beb76274c6f6eb33784fa7e9e94eeca2e refs/pull/2/head
+de60ba4e3deed79cd4d6844e947da5ab02e745a8 refs/pull/3/head
+b6fc001d5a58c3ed997b9f0f536439c4a5efad57 refs/pull/4/head
+be44a50911c41a2450eeacf67849c2c8fab8c689 refs/pull/5/head
